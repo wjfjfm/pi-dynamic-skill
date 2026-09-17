@@ -26,7 +26,13 @@ test('native skill lists, stable context projection, reload refresh and notice-b
   const state = { version: 1, active: [child('active')], pendingEviction: [child('pending'), child('hidden')] };
   const formatted = formatDynamicSkills(state, [root]);
   const native = formatSkillsForPrompt(loadSkillsFromDir({ dir: dirname(child('active')), source: 'test' }).skills);
-  assert.ok(formatted.content.includes(native));
+  assert.ok(formatted.content.includes(native.slice(native.indexOf('<available_skills>'))));
+  const guidance = native.slice(0, native.indexOf('<available_skills>')).trim();
+  assert.equal(formatted.content.split(guidance).length - 1, 1);
+  assert.match(formatted.content, /### Root Skills/);
+  assert.match(formatted.content, /### Active skills/);
+  assert.match(formatted.content, /### Pending eviction/);
+  assert.match(formatted.content, /Read a skill's SKILL.md to retain it/);
   assert.match(formatted.content, /<location>.*pending\/SKILL.md<\/location>/);
   assert.doesNotMatch(formatted.content, /PRIVATE BODY/);
   assert.doesNotMatch(formatted.content, /Hidden instructions/);
@@ -52,7 +58,7 @@ test('native skill lists, stable context projection, reload refresh and notice-b
   await hooks.get('resources_discover')({ reason: 'reload' }, ctx);
   const refreshed = project();
   assert.match(refreshed[0].content, /Updated description/);
-  assert.doesNotMatch(refreshed[0].content.split("### Pending eviction")[1], /Pending instructions/);
+  assert.doesNotMatch(refreshed[0].content, /### Pending eviction|Pending instructions|Read a skill's SKILL.md to retain it/);
   assert.match(refreshed[0].content, /<name>group<\/name>/, "first-level navigation remains available");
   assert.match(readFileSync(child('pending'), 'utf8'), /Pending instructions/, 'eviction never deletes skill files');
 });
@@ -72,11 +78,11 @@ test('direct children have a fixed native section without bodies or LRU slots', 
   }
   const state = { version: 1, active: [roots[0], children[0]], pendingEviction: [roots[1], children[1]] };
   const formatted = formatDynamicSkills(state, [...roots, roots[0]]);
-  const [rootSection, rest] = formatted.content.split('### Active skills');
+  const rootSection = formatted.content;
   assert.match(rootSection, /### Root Skills/);
   for (const child of children) assert.ok(rootSection.includes(`<location>${child}</location>`));
   assert.equal((rootSection.match(/<name>entry<\/name>/g) ?? []).length, 2);
-  assert.doesNotMatch(rest, /<name>dynamic-skill<\/name>/);
+  assert.doesNotMatch(formatted.content, /### Active skills|### Pending eviction|None\./);
   assert.doesNotMatch(formatted.content, /ROOT BODY|CHILD BODY|<name>dynamic-skill<\/name>/);
   assert.deepEqual(formatted.pendingPaths, []);
   const manager = SessionManager.inMemory(cwd);
@@ -94,4 +100,11 @@ test('direct children have a fixed native section without bodies or LRU slots', 
   assert.deepEqual(manager.getLeafEntry().data, { version: 1, active: [], pendingEviction: [] });
   const projected = hooks.get('context')({ messages: [] }, ctx).messages[0].content;
   for (const child of children) assert.ok(projected.includes(`<location>${child}</location>`));
+});
+
+
+test('an empty skill list retains the ON marker without empty sections or instructions', () => {
+  const formatted = formatDynamicSkills({ active: [], pendingEviction: [] }, []);
+  assert.equal(formatted.content, '[dynamic-skill extention: ON]\n\n## Dynamic skills');
+  assert.deepEqual(formatted.pendingPaths, []);
 });
