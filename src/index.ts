@@ -76,7 +76,7 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
         if (!existsSync(root)) {
           try {
             await mkdir(dirname(root), { recursive: true });
-            await writeFile(root, "---\nname: dynamic-skill\ndescription: Entry point for dynamically loaded skills. Follow child skill links when relevant to the task.\n---\n", { flag: "wx" });
+            await writeFile(root, "---\nname: dynamic-skill\ndescription: Entry point for dynamically loaded skills.\n---\n", { flag: "wx" });
           } catch (error) {
             if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
           }
