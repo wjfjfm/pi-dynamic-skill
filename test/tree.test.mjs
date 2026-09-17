@@ -141,10 +141,34 @@ test('invalid, incomplete, and symlinked nodes are diagnosed without erasing aut
   await symlink(join(f.cwd, 'outside'), join(f.cwd, 'dynamic-skill', 'skills', 'linked'));
   const result = synchronizeTrees([f.root]);
   assert.equal(result.roots[0].children.length, 0);
-  assert.equal(result.diagnostics.length, 3);
+  assert.ok(result.diagnostics.some((message) => message.includes('missing')));
+  assert.ok(result.diagnostics.some((message) => message.includes('invalid')));
+  assert.ok(result.diagnostics.some((message) => message.includes('linked')));
   assert.equal(await readFile(outside, 'utf8'), skill('linked'));
   const malformed = skill('dynamic-skill', 'Root', `${START}\nUnclosed`);
   await writeFile(f.root, malformed);
   assert.equal(synchronizeTrees([f.root]).roots.length, 0);
   assert.equal(await readFile(f.root, 'utf8'), malformed);
+});
+
+test('every SKILL.md inside the root is checked, even in hidden or misplaced directories', async (t) => {
+  const h = await harness(t);
+  const misplaced = join(h.cwd, 'dynamic-skill', 'references', 'deep', 'SKILL.md');
+  const result = await h.call('write', { path: misplaced, content: skill('wrong') });
+  assert.equal(result.isError, false);
+  assert.match(result.content.at(-1).text, /skills\/<name>\/SKILL.md/);
+  assert.match(result.content.at(-1).text, /name must match its node name: deep/);
+  const hidden = join(h.cwd, 'dynamic-skill', '.hidden', 'nested', 'SKILL.md');
+  await h.write(hidden, 'Not a skill');
+  const orphan = join(h.child('missing'), '..', 'skills', 'orphan', 'SKILL.md');
+  await h.write(orphan, skill('incorrect'));
+  const diagnostics = synchronizeTrees([h.root]).diagnostics.join('\n');
+  assert.ok(diagnostics.includes(misplaced));
+  assert.ok(diagnostics.includes(hidden));
+  assert.ok(diagnostics.includes(orphan));
+  assert.match(diagnostics, /YAML frontmatter/);
+  assert.match(diagnostics, /name must match its node name: orphan/);
+  assert.equal(await readFile(hidden, 'utf8'), 'Not a skill');
+  const outside = await h.call('write', { path: join(h.cwd, 'outside', 'SKILL.md'), content: 'Not a skill' });
+  assert.equal(outside.content.length, 1);
 });

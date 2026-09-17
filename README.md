@@ -43,6 +43,8 @@ Check the project's test commands and cover the relevant behavior.
 
 Child names must match their directory names: at most 64 lowercase letters, digits, and single hyphens. Descriptions must be nonblank and at most 1024 characters. Custom bodies may be empty. Incomplete or invalid nodes are reported and excluded from navigation until repaired. Symlinked child nodes are not traversed.
 
+Every `SKILL.md` inside the managed root declares a skill, including files in hidden or misplaced directories. Startup/reload validates all of them, even below invalid or missing parent skills. Successful writes/edits validate the written skill's path, metadata, and ancestor skills. Files require a closed YAML frontmatter block; the root directory and its `name` must both be `dynamic-skill`. These requirements do not apply to files outside the managed root.
+
 ## Generated navigation
 
 The extension maintains this block in each parent that has valid children:

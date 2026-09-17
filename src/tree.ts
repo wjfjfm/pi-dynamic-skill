@@ -22,6 +22,9 @@ export function managedBlock(text: string): { start: number; end: number; text: 
 }
 
 export function validateSkill(text: string, expectedName: string): { name: string; description: string; body: string } {
+  if (!/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.test(text)) {
+    throw new Error("SKILL.md requires YAML frontmatter enclosed by --- lines.");
+  }
   const { frontmatter, body } = parseFrontmatter(text);
   const { name, description } = frontmatter;
   if (typeof name !== "string" || !slug.test(name) || name.length > 64 || name !== expectedName) {
@@ -55,6 +58,7 @@ function synchronizeNodes(targets: { filePath: string; name: string }[], recursi
   const diagnostics: string[] = [];
   const visit = (filePath: string, expectedName: string): SkillNode | undefined => {
     try {
+      if (basename(dirname(filePath)) !== expectedName) throw new Error(`Skill directory must be named ${expectedName}`);
       if (!lstatSync(filePath).isFile() || lstatSync(filePath).isSymbolicLink()) throw new Error("SKILL.md must be a regular file");
       const original = readFileSync(filePath, "utf8");
       const parsed = validateSkill(original, expectedName);
@@ -115,8 +119,62 @@ function synchronizeNodes(targets: { filePath: string; name: string }[], recursi
 }
 
 
+function validTreePath(root: string, filePath: string): boolean {
+  const parts = relative(dirname(root), filePath).split(sep);
+  return parts.length % 2 === 1 && parts.slice(0, -1).every((part, i) => i % 2 === 0 ? part === "skills" : slug.test(part) && part.length <= 64);
+}
+
+/** Inspect every declared skill, including files outside the valid navigation tree. */
+function inspectSkill(root: string, filePath: string): string[] {
+  const diagnostics: string[] = [];
+  const validPath = validTreePath(root, filePath);
+  if (!validPath) diagnostics.push(`${filePath}: Child skills must use skills/<name>/SKILL.md at every level.`);
+  let current = dirname(root);
+  for (const part of relative(current, filePath).split(sep)) {
+    current = join(current, part);
+    if (lstatSync(current, { throwIfNoEntry: false })?.isSymbolicLink()) {
+      return [...diagnostics, `${filePath}: Symlinked skill nodes are not supported.`];
+    }
+  }
+  const check = (path: string) => {
+    try {
+      if (!lstatSync(path).isFile()) throw new Error("SKILL.md must be a regular file");
+      const expectedName = path === root ? "dynamic-skill" : basename(dirname(path));
+      if (basename(dirname(path)) !== expectedName) throw new Error(`Skill directory must be named ${expectedName}`);
+      validateSkill(readFileSync(path, "utf8"), expectedName);
+    } catch (error) {
+      diagnostics.push(`${path}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  check(filePath);
+  if (validPath) {
+    for (let ancestor = filePath; ancestor !== root;) {
+      ancestor = join(dirname(dirname(dirname(ancestor))), "SKILL.md");
+      check(ancestor);
+    }
+  }
+  return diagnostics;
+}
+
 export function synchronizeTrees(rootPaths: string[]): TreeResult {
-  return synchronizeNodes([...new Set(rootPaths)].map((filePath) => ({ filePath, name: "dynamic-skill" })), true);
+  const paths = [...new Set(rootPaths)];
+  const diagnostics: string[] = [];
+  for (const root of paths) {
+    const walk = (directory: string) => {
+      try {
+        for (const entry of readdirSync(directory, { withFileTypes: true })) {
+          const path = join(directory, entry.name);
+          if (entry.name === "SKILL.md") diagnostics.push(...inspectSkill(root, path));
+          if (entry.isDirectory()) walk(path);
+        }
+      } catch (error) {
+        diagnostics.push(`${directory}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    };
+    walk(dirname(root));
+  }
+  const result = synchronizeNodes(paths.map((filePath) => ({ filePath, name: "dynamic-skill" })), true);
+  return { roots: result.roots, diagnostics: [...new Set([...diagnostics, ...result.diagnostics])] };
 }
 
 /** Refresh only the written node and its direct parent, without rewriting other branches. */
@@ -128,9 +186,8 @@ export function refreshWrittenSkill(rootPaths: string[], filePath: string): stri
   });
   if (!root) return;
   const parts = relative(dirname(root), filePath).split(sep);
-  if (parts.length % 2 !== 1 || parts.slice(0, -1).some((part, i) => i % 2 === 0 ? part !== "skills" : !slug.test(part) || part.length > 64)) {
-    return ["Child skills must use skills/<name>/SKILL.md at every level."];
-  }
+  const diagnostics = inspectSkill(root, filePath);
+  if (!validTreePath(root, filePath)) return diagnostics;
   let current = dirname(root);
   for (const part of parts) {
     current = join(current, part);
@@ -140,5 +197,5 @@ export function refreshWrittenSkill(rootPaths: string[], filePath: string): stri
   if (parts.length > 1) {
     targets.push({ filePath: join(dirname(dirname(dirname(filePath))), "SKILL.md"), name: parts.length === 3 ? "dynamic-skill" : parts.at(-4)! });
   }
-  return synchronizeNodes(targets, false).diagnostics;
+  return [...new Set([...diagnostics, ...synchronizeNodes(targets, false).diagnostics])];
 }
