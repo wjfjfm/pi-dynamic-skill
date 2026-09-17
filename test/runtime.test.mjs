@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager, formatSkillsForPrompt } from '@earendil-works/pi-coding-agent';
 
-test('real Pi runtime discovers a persistent blank root without auto-expanding it or adding tools', async (t) => {
+test('real Pi runtime creates the template root and expands its authored content without adding tools', async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), 'dynamic-runtime-'));
   const agentDir = join(cwd, 'agent');
   const previous = process.env.PI_CODING_AGENT_DIR;
@@ -26,7 +26,7 @@ test('real Pi runtime discovers a persistent blank root without auto-expanding i
   await session.bindExtensions({ onError: (error) => errors.push(error) });
   const root = join(agentDir, 'skills', 'dynamic-skill', 'SKILL.md');
   const source = await readFile(root, 'utf8');
-  assert.equal(source.trim().split('---').at(-1).trim(), '');
+  assert.equal(source, await readFile('templates/dynamic-skill/SKILL.md', 'utf8'));
   const skills = loader.getSkills().skills;
   assert.equal(skills.filter((skill) => skill.name === 'dynamic-skill').length, 1);
   assert.equal(skills.find((skill) => skill.name === 'dynamic-skill').filePath, root);
@@ -37,7 +37,8 @@ test('real Pi runtime discovers a persistent blank root without auto-expanding i
   const messages = await session.extensionRunner.emitContext(original);
   assert.equal(messages[0].customType, 'dynamic-skill:context');
   assert.match(messages[0].content, /## Dynamic skills/);
-  assert.doesNotMatch(messages[0].content, /Persistent authored root body/);
+  assert.match(messages[0].content, /Persistent authored root body/);
+  assert.equal(messages[0].content.split("Dynamic skills preserve reusable knowledge").length - 1, 1);
   assert.deepEqual(messages.slice(1), original);
   const catalog = formatSkillsForPrompt(skills);
   assert.match(catalog, /<name>dynamic-skill<\/name>/);

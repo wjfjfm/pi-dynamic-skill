@@ -26,7 +26,8 @@ test('native skill lists, stable context projection, reload refresh and notice-b
   const native = formatSkillsForPrompt(loadSkillsFromDir({ dir: dirname(child('active')), source: 'test' }).skills);
   assert.ok(formatted.content.includes(native));
   assert.match(formatted.content, /<location>.*pending\/SKILL.md<\/location>/);
-  assert.doesNotMatch(formatted.content, /PRIVATE BODY|Hidden instructions/);
+  assert.equal(formatted.content.split("PRIVATE BODY").length - 1, 1, "only the root body is expanded");
+  assert.doesNotMatch(formatted.content, /Hidden instructions/);
   assert.deepEqual(formatted.pendingPaths, [child('pending')]);
   const manager = SessionManager.inMemory(cwd);
   manager.appendCustomEntry(ACCESS_STATE, state);
@@ -49,7 +50,8 @@ test('native skill lists, stable context projection, reload refresh and notice-b
   await hooks.get('resources_discover')({ reason: 'reload' }, ctx);
   const refreshed = project();
   assert.match(refreshed[0].content, /Updated description/);
-  assert.doesNotMatch(refreshed[0].content, /Pending instructions/);
+  assert.doesNotMatch(refreshed[0].content.split("### Pending eviction")[1], /Pending instructions/);
+  assert.match(refreshed[0].content, /\[pending\]\(\.\/skills\/pending\/SKILL.md\)/, "root navigation remains available after LRU eviction");
   assert.match(readFileSync(child('pending'), 'utf8'), /Pending instructions/, 'eviction never deletes skill files');
 });
 
@@ -68,7 +70,8 @@ test('discovered roots have a fixed native section and never occupy active or pe
   for (const root of roots) assert.ok(rootSection.includes(`<location>${root}</location>`));
   assert.equal((rootSection.match(/<name>dynamic-skill<\/name>/g) ?? []).length, 2);
   assert.doesNotMatch(rest, /<name>dynamic-skill<\/name>/);
-  assert.doesNotMatch(formatted.content, /ROOT BODY/);
+  assert.equal((formatted.content.match(/ROOT BODY/g) ?? []).length, 2);
+  for (const root of roots) assert.ok(rootSection.includes(`Base directory: ${JSON.stringify(dirname(root))}`));
   assert.deepEqual(formatted.pendingPaths, []);
   const manager = SessionManager.inMemory(cwd);
   manager.appendCustomEntry(ACCESS_STATE, state);

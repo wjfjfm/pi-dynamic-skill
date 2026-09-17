@@ -10,7 +10,7 @@
       "import": "./dist/skills.js"
     }
   },
-  "files": ["dist", "src", "tsconfig.json", "tsconfig.build.json", "README.md", "README.zh-CN.md"],
+  "files": ["dist", "src", "templates", "tsconfig.json", "tsconfig.build.json", "README.md", "README.zh-CN.md"],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/wjfjfm/pi-dynamic-skill.git"

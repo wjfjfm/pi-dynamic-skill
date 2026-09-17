@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -76,7 +76,8 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
         if (!existsSync(root)) {
           try {
             await mkdir(dirname(root), { recursive: true });
-            await writeFile(root, "---\nname: dynamic-skill\ndescription: Entry point for dynamically loaded skills.\n---\n", { flag: "wx" });
+            const template = await readFile(new URL("../templates/dynamic-skill/SKILL.md", import.meta.url), "utf8");
+            await writeFile(root, template, { flag: "wx" });
           } catch (error) {
             if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
           }
