@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { test } from 'node:test';
 import { loadSkillsFromDir, createReadToolDefinition, createWriteToolDefinition, createEditToolDefinition } from '@earendil-works/pi-coding-agent';
 import extension from '../dist/index.js';
-import { synchronizeTrees, START, END } from '../dist/tree.js';
+import { synchronizeTrees, isManagedSkill, START, END } from '../dist/tree.js';
 
 const skill = (name, description = `${name} instructions`, body = '') => `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n---\n${body}`;
 async function fixture(t) {
@@ -149,6 +149,29 @@ test('invalid, incomplete, and symlinked nodes are diagnosed without erasing aut
   await writeFile(f.root, malformed);
   assert.equal(synchronizeTrees([f.root]).roots.length, 0);
   assert.equal(await readFile(f.root, 'utf8'), malformed);
+});
+
+test('local refresh, full scan, and access eligibility agree on invalid child directories', async (t) => {
+  const h = await harness(t);
+  for (const kind of ['file', 'symlink', 'dangling-symlink']) {
+    const path = h.child(kind);
+    await h.call('write', { path, content: skill(kind) });
+    const directory = join(path, '..', 'skills');
+    if (kind === 'file') await writeFile(directory, 'not a directory');
+    else await symlink(kind === 'symlink' ? h.cwd : join(h.cwd, 'missing'), directory);
+    const result = await h.call('edit', { path, edits: [{ oldText: `${kind} instructions`, newText: 'Updated description' }] });
+    assert.equal(result.isError, false);
+    assert.match(result.content.at(-1).text, /skills must be a real directory/);
+    assert.equal(isManagedSkill([h.root], path), false);
+    const local = await readFile(h.root, 'utf8');
+    assert.equal(local.includes(`./skills/${kind}/SKILL.md`), false);
+    assert.ok(synchronizeTrees([h.root]).diagnostics.some((line) => line.includes(path) && line.includes('skills must be a real directory')));
+    assert.equal(await readFile(h.root, 'utf8'), local);
+    await rm(directory);
+    await h.call('write', { path, content: skill(kind) });
+    assert.equal(isManagedSkill([h.root], path), true);
+    assert.ok((await readFile(h.root, 'utf8')).includes(`./skills/${kind}/SKILL.md`));
+  }
 });
 
 test('every SKILL.md inside the root is checked, even in hidden or misplaced directories', async (t) => {
