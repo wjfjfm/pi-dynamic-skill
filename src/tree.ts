@@ -51,7 +51,7 @@ function withChildren(text: string, children: SkillNode[]): string {
 }
 
 /** Only traverse skills/<name>/SKILL.md; never follow symlinks inside a tree. */
-export function synchronizeTrees(rootPaths: string[], pendingWrites = new Set<string>()): TreeResult {
+function synchronizeNodes(targets: { filePath: string; name: string }[], recursive: boolean): TreeResult {
   const diagnostics: string[] = [];
   const visit = (filePath: string, expectedName: string): SkillNode | undefined => {
     try {
@@ -73,8 +73,18 @@ export function synchronizeTrees(rootPaths: string[], pendingWrites = new Set<st
             diagnostics.push(`${childPath}: missing; subtree not loaded until its parent skill exists`);
             continue;
           }
-          const child = visit(childPath, entry.name);
-          if (child) children.push(child);
+          if (recursive) {
+            const child = visit(childPath, entry.name);
+            if (child) children.push(child);
+          } else {
+            try {
+              if (!lstatSync(childPath).isFile() || lstatSync(childPath).isSymbolicLink()) throw new Error("SKILL.md must be a regular file");
+              const child = validateSkill(readFileSync(childPath, "utf8"), entry.name);
+              children.push({ ...child, filePath: childPath, children: [] });
+            } catch (error) {
+              diagnostics.push(`${childPath}: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          }
         }
       }
       // Direct child skill directories outside skills/ are not valid tree nodes.
@@ -84,7 +94,7 @@ export function synchronizeTrees(rootPaths: string[], pendingWrites = new Set<st
         }
       }
       const updated = withChildren(original, children);
-      if (updated !== original && !pendingWrites.has(filePath)) {
+      if (updated !== original) {
         const temporary = join(dirname(filePath), `.dynamic-skill-${randomUUID()}.tmp`);
         try {
           writeFileSync(temporary, updated, { flag: "wx", mode: lstatSync(filePath).mode & 0o777 });
@@ -94,42 +104,41 @@ export function synchronizeTrees(rootPaths: string[], pendingWrites = new Set<st
           if (existsSync(temporary)) unlinkSync(temporary);
         }
       }
-      return { ...parsed, body: parseFrontmatter(pendingWrites.has(filePath) ? original : updated).body, filePath, children };
+      return { ...parsed, body: parseFrontmatter(updated).body, filePath, children };
     } catch (error) {
       diagnostics.push(`${filePath}: ${error instanceof Error ? error.message : String(error)}`);
       return undefined;
     }
   };
-  const roots = [...new Set(rootPaths)].flatMap((path) => { const node = visit(path, "dynamic-skill"); return node ? [node] : []; });
+  const roots = targets.flatMap(({ filePath, name }) => { const node = visit(filePath, name); return node ? [node] : []; });
   return { roots, diagnostics };
 }
 
-/** Returns the expected name for SKILL.md files in a managed tree. */
-export function managedTarget(rootPaths: string[], path: string): string | undefined {
-  for (const root of rootPaths) {
-    const rel = relative(dirname(root), path);
-    if (rel.startsWith(`..${sep}`) || rel === ".." || rel.startsWith(sep)) continue;
-    if (basename(path) !== "SKILL.md") return undefined;
-    const parts = rel.split(sep);
-    if (parts.length % 2 !== 1 || parts.at(-1) !== "SKILL.md" || parts.slice(0, -1).some((part, i) => i % 2 === 0 ? part !== "skills" : !slug.test(part) || part.length > 64)) {
-      throw new Error("Child skills must use skills/<name>/SKILL.md at every level.");
-    }
-    let current = dirname(root);
-    for (const part of parts) {
-      current = join(current, part);
-      if (lstatSync(current, { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error("Symlinked skill nodes are not supported.");
-    }
-    return parts.length === 1 ? "dynamic-skill" : parts.at(-2)!;
-  }
-  return undefined;
+
+export function synchronizeTrees(rootPaths: string[]): TreeResult {
+  return synchronizeNodes([...new Set(rootPaths)].map((filePath) => ({ filePath, name: "dynamic-skill" })), true);
 }
 
-/** Validate ordinary write/edit operations without letting callers author the generated block. */
-export function validateChange(original: string | undefined, updated: string, name: string): void {
-  validateSkill(updated, name);
-  const after = managedBlock(updated);
-  // A complete rewrite without a block can also repair malformed external edits.
-  const before = after && original !== undefined ? managedBlock(original) : undefined;
-  if (after && after.text.replace(/\r\n/g, "\n") !== before?.text.replace(/\r\n/g, "\n")) throw new Error("The dynamic-skill block is generated; edit the child skills instead.");
-  // Omitting the generated block in a complete rewrite is fine: synchronization restores it.
+/** Refresh only the written node and its direct parent, without rewriting other branches. */
+export function refreshWrittenSkill(rootPaths: string[], filePath: string): string[] | undefined {
+  if (basename(filePath) !== "SKILL.md") return;
+  const root = rootPaths.find((path) => {
+    const rel = relative(dirname(path), filePath);
+    return rel !== ".." && !rel.startsWith(`..${sep}`) && !rel.startsWith(sep);
+  });
+  if (!root) return;
+  const parts = relative(dirname(root), filePath).split(sep);
+  if (parts.length % 2 !== 1 || parts.slice(0, -1).some((part, i) => i % 2 === 0 ? part !== "skills" : !slug.test(part) || part.length > 64)) {
+    return ["Child skills must use skills/<name>/SKILL.md at every level."];
+  }
+  let current = dirname(root);
+  for (const part of parts) {
+    current = join(current, part);
+    if (lstatSync(current, { throwIfNoEntry: false })?.isSymbolicLink()) return ["Symlinked skill nodes are not supported."];
+  }
+  const targets = [{ filePath, name: parts.length === 1 ? "dynamic-skill" : parts.at(-2)! }];
+  if (parts.length > 1) {
+    targets.push({ filePath: join(dirname(dirname(dirname(filePath))), "SKILL.md"), name: parts.length === 3 ? "dynamic-skill" : parts.at(-4)! });
+  }
+  return synchronizeNodes(targets, false).diagnostics;
 }

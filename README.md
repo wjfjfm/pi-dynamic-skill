@@ -62,10 +62,13 @@ Only direct children are listed. The extension preserves text outside the block,
 
 - Neither root nor child bodies are automatically injected. Read the root when relevant, then follow its child links as needed. Give the root a description that explains what its tree contains and when to consult it.
 - The extension maintains skill files without injecting messages or modifying conversation history.
-- Before a managed `read`, indexes are refreshed. Before `write` or `edit`, paths, metadata, and generated-block ownership are checked. Skill edits require unique exact matches (with line-ending normalization).
-- Successful managed writes and edits refresh parent indexes. Ordinary files outside the tree are unaffected. Supporting files inside a skill are also ordinary files.
-- Full scans on startup/reload, before requests, and at turn completion reconcile changes made through `bash` or external editors. These writes are not intercepted; invalid nodes are diagnosed during scanning.
-- Parent index writes are deferred while a tracked native write/edit to that parent is pending. Authors should use the normal file tools and leave generated blocks to the extension. A complete rewrite may omit the block; it is regenerated.
+- After a successful `write` or `edit` to a managed `SKILL.md`, validate the actual file and refresh only that node and its direct parent's index. Other branches are not rewritten.
+- Invalid skill metadata or paths append a `[dynamic-skill]` diagnostic to the original tool result. The file remains written and the tool's success status, existing content blocks, and details are preserved. Invalid children are removed from the parent's index when it can be refreshed.
+- Writes and edits are not intercepted or blocked. Changes to generated text are overwritten by regeneration. Malformed marker pairs are reported without guessing which author text to replace.
+- Failed operations, reads, supporting files, and files outside the tree do not trigger maintenance. Startup/reload performs a full scan; changes made via `bash` or an external editor are otherwise discovered only when an affected node is refreshed.
+- There are only two hooks: `resources_discover` for initialization and `tool_result` for successful writes/edits. No background watcher, timer, per-request scan, or cross-process lock is installed. Concurrent Pi instances writing the same parent are not coordinated in this version.
+
+Read tracking and persistent active-skill context management are not implemented yet.
 
 Already-read child content remains an ordinary tool result in history. Refreshing the root or changing a file does not rewrite previous tool results. This extension does not compact conversation history.
 

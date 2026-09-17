@@ -27,16 +27,16 @@ async function harness(t) {
     registerTool: () => assert.fail('Extension must be tool free') };
   extension(pi);
   const ctx = { cwd: f.cwd, ui: { notify: (...args) => warnings.push(args) } };
-  await hooks.get('session_start')({ reason: 'startup' }, ctx);
+  await hooks.get('resources_discover')({ reason: 'startup' }, ctx);
+  assert.deepEqual([...hooks.keys()].sort(), ['resources_discover', 'tool_result']);
   const native = { read: createReadToolDefinition(f.cwd), write: createWriteToolDefinition(f.cwd), edit: createEditToolDefinition(f.cwd) };
   let sequence = 0;
   const call = async (toolName, input) => {
     const toolCallId = String(sequence++);
-    const before = await hooks.get('tool_call')({ toolName, input, toolCallId }, ctx);
-    if (before?.block) return before;
     const result = await native[toolName].execute(toolCallId, input, undefined, undefined, ctx);
-    await hooks.get('tool_result')({ toolName, input, toolCallId, isError: false, ...result }, ctx);
-    return result;
+    const event = { toolName, input, toolCallId, isError: false, ...result };
+    const modified = await hooks.get('tool_result')(event, ctx);
+    return { ...event, ...modified };
   };
   return { ...f, hooks, ctx, call, warnings, commands };
 }
@@ -64,49 +64,72 @@ test('tree navigation is direct-child only, stable, and preserves authored text'
   assert.doesNotMatch(await readFile(f.root, 'utf8'), /Child skills/);
 });
 
-test('native write/edit/read update parent indexes without registering tools', async (t) => {
+test('successful write/edit refresh node and parent; invalid writes stay successful with diagnostics', async (t) => {
   const h = await harness(t);
   const created = await h.call('write', { path: h.child('testing'), content: skill('testing', 'First description') });
-  assert.equal(created.block, undefined);
+  assert.equal(created.isError, false);
   assert.match(await readFile(h.root, 'utf8'), /First description/);
   await h.call('edit', { path: h.child('testing'), edits: [{ oldText: 'First description', newText: 'Updated description' }] });
   assert.match(await readFile(h.root, 'utf8'), /Updated description/);
-  const rejected = await h.call('write', { path: h.child('testing'), content: skill('wrong-name') });
-  assert.equal(rejected.block, true);
-  assert.match(await readFile(h.child('testing'), 'utf8'), /Updated description/);
-  assert.equal((await h.call('edit', { path: h.root, edits: [{ oldText: 'Updated description', newText: 'manual index edit' }] })).block, true);
-  assert.equal((await h.call('write', { path: join(h.cwd, 'dynamic-skill', 'wrong', 'SKILL.md'), content: skill('wrong') })).block, true);
-  await h.write(h.child('testing'), skill('testing', 'External update'));
-  const result = await h.call('read', { path: h.root });
-  assert.match(result.content.map((x) => x.text ?? '').join(''), /External update/);
-  await writeFile(h.root, skill('dynamic-skill', 'Root', `${START}\nBroken block`));
-  assert.equal((await h.call('write', { path: h.root, content: skill('dynamic-skill', 'Root', 'Repaired body') })).block, undefined);
-  assert.match(await readFile(h.root, 'utf8'), /Repaired body/);
-  assert.match(await readFile(h.root, 'utf8'), /External update/);
-  // Unrelated files, including arbitrary SKILL.md files, remain ordinary files.
-  assert.equal((await h.call('write', { path: join(h.cwd, 'unrelated', 'SKILL.md'), content: 'not YAML' })).block, undefined);
+  const invalid = await h.call('write', { path: h.child('testing'), content: '---\nname: testing\n---\nAuthor body' });
+  assert.equal(invalid.isError, false);
+  assert.match(invalid.content[0].text, /Successfully wrote/);
+  assert.match(invalid.content.at(-1).text, /\[dynamic-skill\].*succeeded/);
+  assert.match(invalid.content.at(-1).text, /description/);
+  assert.match(await readFile(h.child('testing'), 'utf8'), /Author body/);
+  assert.doesNotMatch(await readFile(h.root, 'utf8'), /Child skills/);
+  await h.call('write', { path: h.child('testing'), content: skill('testing', 'Repaired description') });
+  assert.match(await readFile(h.root, 'utf8'), /Repaired description/);
+  // Generated text is not protected: successful edits are simply regenerated.
+  const edited = await h.call('edit', { path: h.root, edits: [{ oldText: 'Repaired description', newText: 'manual index edit' }] });
+  assert.equal(edited.isError, false);
+  assert.match(await readFile(h.root, 'utf8'), /Repaired description/);
+  assert.doesNotMatch(await readFile(h.root, 'utf8'), /manual index edit/);
+  const malformed = await h.call('write', { path: h.root, content: skill('dynamic-skill', 'Root', `${START}\nBroken block`) });
+  assert.equal(malformed.isError, false);
+  assert.match(malformed.content.at(-1).text, /Malformed/);
+  assert.match(await readFile(h.root, 'utf8'), /Broken block/);
 });
 
-test('context maintains indexes without loading roots or children until read', async (t) => {
+test('only successful writes/edits to managed skill files trigger maintenance', async (t) => {
   const h = await harness(t);
-  await h.write(h.child('testing'), skill('testing', 'Child navigation', 'SECRET_CHILD_BODY'));
-  const options = { skills: [{ name: 'dynamic-skill', filePath: h.root, disableModelInvocation: false }] };
-  assert.equal(h.hooks.get('before_agent_start')({ systemPromptOptions: options }, h.ctx), undefined);
-  const messages = [{ role: 'user', content: 'Task', timestamp: 1 }];
-  const snapshot = structuredClone(messages);
-  assert.equal(h.hooks.get('context')({ messages }, h.ctx), undefined);
-  assert.deepEqual(messages, snapshot);
-  await h.write(h.child('testing'), skill('testing', 'Fresh navigation', 'SECRET_CHILD_BODY'));
-  assert.equal(h.hooks.get('context')({ messages }, h.ctx), undefined);
-  assert.deepEqual(messages, snapshot);
-  assert.match(await readFile(h.root, 'utf8'), /Fresh navigation/);
-  const rootRead = await h.call('read', { path: h.root });
-  const text = rootRead.content.map((part) => part.text ?? '').join('');
-  assert.match(text, /My own instructions/);
-  assert.match(text, /Fresh navigation/);
-  assert.doesNotMatch(text, /SECRET_CHILD_BODY/);
-  const childRead = await h.call('read', { path: h.child('testing') });
-  assert.match(childRead.content.map((part) => part.text ?? '').join(''), /SECRET_CHILD_BODY/);
+  await h.write(h.child('testing'), skill('testing'));
+  const before = await readFile(h.root, 'utf8');
+  const event = { toolName: 'write', input: { path: h.child('testing') }, toolCallId: 'id', isError: true, content: [{ type: 'text', text: 'Failure' }] };
+  assert.equal(h.hooks.get('tool_result')(event, h.ctx), undefined);
+  await h.call('read', { path: h.root });
+  await h.call('write', { path: join(h.cwd, 'outside', 'SKILL.md'), content: 'not YAML' });
+  await h.call('write', { path: join(h.cwd, 'dynamic-skill', 'notes.txt'), content: 'supporting file' });
+  assert.equal(await readFile(h.root, 'utf8'), before);
+  const wrongPath = join(h.cwd, 'dynamic-skill', 'wrong', 'SKILL.md');
+  const invalid = await h.call('write', { path: wrongPath, content: skill('wrong') });
+  assert.equal(invalid.isError, false);
+  assert.match(invalid.content.at(-1).text, /skills\/<name>\/SKILL.md/);
+  assert.equal(await readFile(wrongPath, 'utf8'), skill('wrong'));
+});
+
+test('refresh is local and preserves tool result blocks and details', async (t) => {
+  const h = await harness(t);
+  await h.call('write', { path: h.child('development'), content: skill('development') });
+  await h.call('write', { path: h.child('research'), content: skill('research') });
+  const research = await readFile(h.child('research'), 'utf8');
+  const researchTime = (await stat(h.child('research'))).mtimeMs;
+  const nested = join(h.child('development'), '..', 'skills', 'testing', 'SKILL.md');
+  await h.call('write', { path: nested, content: skill('testing', 'Nested tests') });
+  assert.match(await readFile(h.child('development'), 'utf8'), /Nested tests/);
+  assert.doesNotMatch(await readFile(h.root, 'utf8'), /Nested tests/);
+  assert.equal(await readFile(h.child('research'), 'utf8'), research);
+  assert.equal((await stat(h.child('research'))).mtimeMs, researchTime);
+  await writeFile(nested, '---\nname: testing\n---\n');
+  const content = [{ type: 'text', text: 'Original result' }, { type: 'image', data: 'abc', mimeType: 'image/png' }];
+  const event = { toolName: 'edit', input: { path: nested }, isError: false, content, details: { diff: 'retained' } };
+  const result = h.hooks.get('tool_result')(event, h.ctx);
+  assert.deepEqual(result.content.slice(0, 2), content);
+  assert.equal(content.length, 2);
+  assert.equal(result.isError, undefined);
+  assert.equal(result.details, undefined);
+  assert.deepEqual(event.details, { diff: 'retained' });
+  assert.doesNotMatch(await readFile(h.child('development'), 'utf8'), /Nested tests/);
 });
 
 test('invalid, incomplete, and symlinked nodes are diagnosed without erasing authored files', async (t) => {
@@ -124,19 +147,4 @@ test('invalid, incomplete, and symlinked nodes are diagnosed without erasing aut
   await writeFile(f.root, malformed);
   assert.equal(synchronizeTrees([f.root]).roots.length, 0);
   assert.equal(await readFile(f.root, 'utf8'), malformed);
-});
-
-test('index writes wait while a native mutation of the parent is pending', async (t) => {
-  const h = await harness(t);
-  const input = { path: h.root, content: skill('dynamic-skill', 'Root entry', 'Replacement user body') };
-  assert.equal(h.hooks.get('tool_call')({ toolName: 'write', toolCallId: 'pending', input }, h.ctx), undefined);
-  const before = await readFile(h.root, 'utf8');
-  await h.call('write', { path: h.child('testing'), content: skill('testing') });
-  assert.equal(await readFile(h.root, 'utf8'), before);
-  await createWriteToolDefinition(h.cwd).execute('pending', input, undefined, undefined, h.ctx);
-  h.hooks.get('tool_result')({ toolName: 'write', toolCallId: 'pending', input, isError: false }, h.ctx);
-  const after = await readFile(h.root, 'utf8');
-  assert.match(after, /Replacement user body/);
-  assert.match(after, /testing/);
-  assert.ok(after.includes(END));
 });
