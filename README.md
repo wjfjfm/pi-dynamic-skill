@@ -10,10 +10,10 @@ Dynamic skill loading and replacement for [Pi](https://github.com/earendil-works
 
 - **Dynamic loading:** make skills available during a session without restarting Pi.
 - **Dynamic replacement:** update which skill content is active in context while retaining saved files for later access.
-- **File-backed knowledge:** store full content in `SKILL.md` files and use ordinary file reading to retrieve it.
-- **Session scope:** keep session knowledge separate from globally available skills.
+- **File-backed skills:** store full content in `SKILL.md` files and use ordinary file reading to retrieve it.
+- **Independent loading:** skill discovery and loading do not depend on the application that produced the files.
 
-Knowledge generation belongs to the caller. For example, [pi-backtrack](https://github.com/wjfjfm/pi-backtrack) can produce knowledge when folding an execution trace and use `pi-dynamic-skill` to manage its availability. Backtracking and summarization remain the caller's responsibility.
+Agents can author and update skill files with ordinary file tools. Applications can also use the package API. The current API accepts a directory from the caller; naming conventions, content generation, and storage scope belong to the caller. Directory configuration and automatic loading policy remain to be designed.
 
 ## Status
 
@@ -24,12 +24,12 @@ The package API creates file-backed skills and reloads directory metadata using 
 ```ts
 import { createSkill, reloadSkills } from "pi-dynamic-skill";
 
-const skill = await createSkill(sessionSkillsDirectory, {
-  name: "backtrack-20260917-153042-123",
-  description: "Consult when investigating retry behavior.",
-  content: "Database issues ruled out. Retry behavior remains unverified.",
+const skill = await createSkill(skillsDirectory, {
+  name: "review-typescript",
+  description: "Use when reviewing TypeScript changes.",
+  content: "Check public types, error handling, and relevant tests.",
 });
-const { skills, diagnostics } = reloadSkills(sessionSkillsDirectory);
+const { skills, diagnostics } = reloadSkills(skillsDirectory);
 ```
 
 The caller supplies the directory and decides when to reload and inject the returned metadata. `createSkill` refuses duplicate names with `SkillExistsError`; existing files can be updated with ordinary file tools and rediscovered on the next reload. Reading the returned `filePath` retrieves the full content. No additional model tool or extension event bus is required.

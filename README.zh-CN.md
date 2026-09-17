@@ -10,10 +10,10 @@
 
 - **动态装载：** 无需重启 Pi，即可在会话中提供新的 skill。
 - **动态替换：** 更新上下文中当前展开的 skill 内容，同时保留已保存的文件供后续访问。
-- **文件存储：** 完整知识保存在 `SKILL.md` 文件中，通过普通文件读取获取。
-- **会话范围：** 会话知识与全局可用的 skill 分开管理。
+- **文件存储：** 完整 skill 内容保存在 `SKILL.md` 文件中，通过普通文件读取获取。
+- **独立加载：** skill 的发现与装载不依赖生成文件的应用。
 
-知识生成由调用方负责。例如，[pi-backtrack](https://github.com/wjfjfm/pi-backtrack) 可以在折叠执行过程时生成知识，再使用 `pi-dynamic-skill` 管理其可用状态。回退和总结仍由调用方负责。
+Agent 可以通过普通文件工具编写和更新 skill，应用也可以调用包接口。目前接口接受调用方提供的目录；命名规则、内容生成和存储范围由调用方决定。目录配置与自动加载策略仍待设计。
 
 ## 当前状态
 
@@ -24,12 +24,12 @@
 ```ts
 import { createSkill, reloadSkills } from "pi-dynamic-skill";
 
-const skill = await createSkill(sessionSkillsDirectory, {
-  name: "backtrack-20260917-153042-123",
-  description: "排查重试行为时查阅。",
-  content: "已排除数据库问题，重试行为仍待验证。",
+const skill = await createSkill(skillsDirectory, {
+  name: "review-typescript",
+  description: "审查 TypeScript 改动时使用。",
+  content: "检查公共类型、错误处理及相关测试。",
 });
-const { skills, diagnostics } = reloadSkills(sessionSkillsDirectory);
+const { skills, diagnostics } = reloadSkills(skillsDirectory);
 ```
 
 调用方提供存储目录，并决定何时重新加载和注入返回的元数据。`createSkill` 遇到同名 skill 时抛出 `SkillExistsError`；已有文件可以通过普通文件工具更新，下次 reload 会重新读取。通过返回的 `filePath` 读取完整内容。无需增加模型 Tool，也无需扩展间事件总线。
