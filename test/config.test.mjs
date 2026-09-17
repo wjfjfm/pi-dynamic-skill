@@ -55,6 +55,7 @@ test('startup and reload load capacity; compact uses the loaded value; shrinking
   await hooks.get('resources_discover')({ reason: 'startup' }, ctx);
   await command.handler('', ctx);
   assert.match(notices.at(-1).text, /Active: 3 \/ 3/);
+  assert.match(hooks.get("context")({ messages: [] }, ctx).messages[0].content, /### Active skills \(3\/3\)/);
   writeFileSync(config, '{"capacity":1}');
   hooks.get('session_compact')({}, ctx);
   assert.equal(manager.getLeafEntry().data.active.length, 3);
@@ -62,6 +63,7 @@ test('startup and reload load capacity; compact uses the loaded value; shrinking
   assert.deepEqual(manager.getLeafEntry().data, { version: 1, active: paths.slice(0, 1), pendingEviction: paths.slice(1) });
   await command.handler('', ctx);
   assert.match(notices.at(-1).text, /Active: 1 \/ 1/);
+  assert.match(hooks.get("context")({ messages: [] }, ctx).messages[0].content, /### Active skills \(1\/1\)/);
   writeFileSync(config, 'broken');
   await hooks.get('resources_discover')({ reason: 'reload' }, ctx);
   assert.ok(notices.some((n) => n.type === 'warning' && n.text.includes('Using capacity 20')));

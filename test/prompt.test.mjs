@@ -30,7 +30,7 @@ test('native skill lists, stable context projection, reload refresh and notice-b
   const guidance = native.slice(0, native.indexOf('<available_skills>')).trim();
   assert.equal(formatted.content.split(guidance).length - 1, 1);
   assert.match(formatted.content, /### Root Skills/);
-  assert.match(formatted.content, /### Active skills/);
+  assert.match(formatted.content, /### Active skills \(1\/20\)/);
   assert.match(formatted.content, /### Pending eviction/);
   assert.match(formatted.content, /Read a skill's SKILL.md to retain it/);
   assert.match(formatted.content, /<location>.*pending\/SKILL.md<\/location>/);
@@ -82,7 +82,7 @@ test('direct children have a fixed native section without bodies or LRU slots', 
   assert.match(rootSection, /### Root Skills/);
   for (const child of children) assert.ok(rootSection.includes(`<location>${child}</location>`));
   assert.equal((rootSection.match(/<name>entry<\/name>/g) ?? []).length, 2);
-  assert.doesNotMatch(formatted.content, /### Active skills|### Pending eviction|None\./);
+  assert.doesNotMatch(formatted.content, /### Pending eviction|None\./);
   assert.doesNotMatch(formatted.content, /ROOT BODY|CHILD BODY|<name>dynamic-skill<\/name>/);
   assert.deepEqual(formatted.pendingPaths, []);
   const manager = SessionManager.inMemory(cwd);
@@ -103,8 +103,8 @@ test('direct children have a fixed native section without bodies or LRU slots', 
 });
 
 
-test('an empty skill list retains the ON marker without empty sections or instructions', () => {
-  const formatted = formatDynamicSkills({ active: [], pendingEviction: [] }, []);
-  assert.equal(formatted.content, '[dynamic-skill extention: ON]\n\n## Dynamic skills');
+test('an empty skill list retains the ON marker and configured capacity without instructions', () => {
+  const formatted = formatDynamicSkills({ active: [], pendingEviction: [] }, [], 7);
+  assert.equal(formatted.content, '[dynamic-skill extention: ON]\n\n## Dynamic skills\n\n### Active skills (0/7)');
   assert.deepEqual(formatted.pendingPaths, []);
 });

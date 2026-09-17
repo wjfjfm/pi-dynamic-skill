@@ -72,9 +72,9 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
       const branch = ctx.sessionManager.getBranch();
       const snapshot = latestAccessState(branch);
       const roots = discover();
-      const key = JSON.stringify([ctx.sessionManager.getSessionId(), snapshot?.id, roots]);
+      const key = JSON.stringify([ctx.sessionManager.getSessionId(), snapshot?.id, roots, capacity]);
       if (projection?.key !== key) {
-        projection = { key, ...formatDynamicSkills(snapshot?.state ?? { active: [], pendingEviction: [] }, roots) };
+        projection = { key, ...formatDynamicSkills(snapshot?.state ?? { active: [], pendingEviction: [] }, roots, capacity) };
       }
       if (snapshot?.state.pendingEviction.length && !noticeWasShown(branch, snapshot.id)) {
         pi.appendEntry(ACCESS_NOTICE, { settlementId: snapshot.id, paths: projection.pendingPaths });
