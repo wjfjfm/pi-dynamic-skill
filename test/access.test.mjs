@@ -66,9 +66,11 @@ test('extension settles on successful compact and reload, never on tool results'
   const cwd = mkdtempSync(join(tmpdir(), 'dynamic-access-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   const root = join(cwd, 'dynamic-skill', 'SKILL.md');
-  const child = join(cwd, 'dynamic-skill', 'skills', 'child', 'SKILL.md');
+  const group = join(cwd, 'dynamic-skill', 'skills', 'group', 'SKILL.md');
+  const child = join(group, '..', 'skills', 'child', 'SKILL.md');
   mkdirSync(join(child, '..'), { recursive: true });
   writeFileSync(root, '---\nname: dynamic-skill\ndescription: Root\n---\n');
+  writeFileSync(group, '---\nname: group\ndescription: Group\n---\n');
   writeFileSync(child, '---\nname: child\ndescription: Child\n---\n');
   const manager = SessionManager.inMemory(cwd);
   const ctx = { cwd, sessionManager: manager, hasUI: true, ui: { notify: (text) => assert.fail(text) } };
@@ -80,7 +82,7 @@ test('extension settles on successful compact and reload, never on tool results'
   });
   install();
   await hooks.get('resources_discover')({ reason: 'startup' }, ctx);
-  record(manager, '1', 'read', 'dynamic-skill/skills/child/SKILL.md');
+  record(manager, '1', 'read', 'dynamic-skill/skills/group/skills/child/SKILL.md');
   const before = manager.getLeafId();
   hooks.get('tool_result')({ toolName: 'read', input: { path: child }, isError: false }, ctx);
   assert.equal(manager.getLeafId(), before);
@@ -101,12 +103,14 @@ test('successful compact refreshes moved/deleted skill indexes before settlement
   const cwd = mkdtempSync(join(tmpdir(), 'dynamic-compact-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   const root = join(cwd, 'dynamic-skill', 'SKILL.md');
-  const child = (name) => join(root, '..', 'skills', name, 'SKILL.md');
+  const group = join(root, '..', 'skills', 'group', 'SKILL.md');
+  const child = (name) => join(group, '..', 'skills', name, 'SKILL.md');
   const write = (path, name) => {
     mkdirSync(join(path, '..'), { recursive: true });
     writeFileSync(path, `---\nname: ${name}\ndescription: ${name} instructions\n---\n`);
   };
   write(root, 'dynamic-skill');
+  write(group, 'group');
   write(child('old'), 'old');
   write(child('removed'), 'removed');
   const manager = SessionManager.inMemory(cwd);
@@ -117,7 +121,7 @@ test('successful compact refreshes moved/deleted skill indexes before settlement
     getCommands: () => [{ source: 'skill', name: 'skill:dynamic-skill', sourceInfo: { path: root } }],
     appendEntry: (type, data) => {
       if (assertRefreshed && type === ACCESS_STATE) {
-        const text = readFileSync(root, 'utf8');
+        const text = readFileSync(group, 'utf8');
         assert.match(text, /skills\/moved\/SKILL.md/);
         assert.doesNotMatch(text, /skills\/(old|removed)\/SKILL.md/);
       }

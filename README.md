@@ -4,7 +4,7 @@
 
 Dynamic skill loading and replacement for [Pi](https://github.com/earendil-works/pi), with **no additional tools**.
 
-Recognized `dynamic-skill` roots are expanded by default in the Root Skills section, including their authored instructions and generated child indexes. Child skill bodies remain on-demand. Each skill contains a generated index of its direct children, so an agent can navigate the tree with ordinary `read` calls. Agents create and update skills with Pi's existing `write` and `edit` tools.
+The root `dynamic-skill` remains in Pi’s native skill catalog for on-demand reading when creating memories or maintaining the skill tree. The Root Skills section lists its direct children using native skill metadata; no skill bodies are automatically expanded. Each skill contains a generated index of its direct children, so an agent can navigate the tree with ordinary `read` calls. Agents create and update skills with Pi's existing `write` and `edit` tools.
 
 ## Install
 
@@ -24,7 +24,7 @@ Optional user configuration lives at `~/.pi/agent/dynamic-skill.json` (under `PI
 { "capacity": 20 }
 ```
 
-`capacity` must be a positive safe integer. Configuration is read at startup and `/reload`; compaction uses the already loaded value. Missing configuration uses 20. Invalid configuration reports a warning and falls back to 20. Reducing capacity moves overflow into pending eviction at settlement. Root skills do not count toward capacity. No configuration file is created automatically.
+`capacity` must be a positive safe integer. Configuration is read at startup and `/reload`; compaction uses the already loaded value. Missing configuration uses 20. Invalid configuration reports a warning and falls back to 20. Reducing capacity moves overflow into pending eviction at settlement. Root files and their direct children do not count toward capacity. No configuration file is created automatically.
 
 ## Tree structure
 
@@ -76,8 +76,8 @@ Navigation updates read the file, compute a replacement for the generated block,
 
 Run `/dynamic-skill` to view recognized root directories and the current session’s active/capacity and pending-eviction counts. Counts reflect the last compact/reload settlement; viewing status does not change the queue.
 
-- Root bodies are automatically expanded with their file paths and base directories. Their direct-child indexes are included, so first-level links remain discoverable even after LRU eviction. Child bodies still require read. Root content is reread on startup and after successful compact/reload, and stays stable between refreshes.
-- A `Dynamic skills` section is projected into model context with separate Root Skills, active, and pending-eviction lists. Usage and tree-maintenance instructions come from root SKILL.md files, not a separate hardcoded prompt. Recognized roots are always listed separately and never occupy LRU capacity; legacy root entries are removed from LRU at the next settlement. All lists use Pi’s native `formatSkillsForPrompt` output (`name`, `description`, `location`), including its escaping and `disable-model-invocation` behavior. Only root bodies are expanded, and the projected message is not saved in conversation history.
+- Root Skills contains the direct children of recognized roots, not the roots themselves. These first-level entries stay visible without occupying LRU capacity; deeper skills use the active/pending queue. All bodies are read on demand. Lists refresh on startup and after successful compact/reload and stay stable between refreshes.
+- A `Dynamic skills` section is projected into model context with separate Root Skills, active, and pending-eviction lists. Usage and tree-maintenance instructions come from root SKILL.md files, not a separate hardcoded prompt. Root files and fixed first-level entries are excluded from LRU; legacy entries are removed from the queue at the next settlement. All lists use Pi’s native `formatSkillsForPrompt` output (`name`, `description`, `location`), including its escaping and `disable-model-invocation` behavior. No skill bodies are expanded, and the projected message is not saved in conversation history.
 - Startup, `/reload`, and successful compaction scan the entire managed tree. After compaction, navigation is refreshed before access settlement and context-list refresh; other Pi resources and extensions are not reloaded. Invalid skills are reported as `[dynamic-skill] Skill warnings` through Pi's warning UI (stderr without a UI), without blocking the session. Generated child navigation is repaired silently; malformed marker boundaries are reported because replacing them could erase authored text. Unexpected initialization failures also become warnings.
 - After a successful `write` or `edit` to a managed `SKILL.md`, validate the actual file and refresh only that node and its direct parent's index. Other branches are not rewritten.
 - Invalid skill metadata or paths append a `[dynamic-skill]` diagnostic to the original tool result. The file remains written and the tool's success status, existing content blocks, and details are preserved. Invalid children are removed from the parent's index when it can be refreshed.

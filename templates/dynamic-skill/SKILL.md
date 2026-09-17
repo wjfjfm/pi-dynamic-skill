@@ -1,6 +1,6 @@
 ---
 name: dynamic-skill
-description: Entry point for dynamically loaded skills.
+description: Use when saving new reusable knowledge or memories, creating dynamic skills, or organizing, merging, moving, and updating the dynamic skill tree.
 ---
 
 Dynamic skills preserve reusable knowledge in a multi-level skill tree.
@@ -25,7 +25,8 @@ write, and edit accesses are deduplicated per settlement interval.
 At compaction or reload, accessed active skills move halfway toward the
 front; new or re-accessed pending skills enter halfway into the active
 queue. Overflow moves to the pending-eviction list.
-Root skills are listed separately and do not occupy LRU capacity or expire.
+Direct children of dynamic-skill roots are listed under Root Skills and do not
+occupy LRU capacity or expire. Deeper skills are managed by the LRU queue.
 
 ## Example
 

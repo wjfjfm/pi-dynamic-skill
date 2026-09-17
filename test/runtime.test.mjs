@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager, formatSkillsForPrompt } from '@earendil-works/pi-coding-agent';
 
-test('real Pi runtime creates the template root and expands its authored content without adding tools', async (t) => {
+test('real Pi runtime creates the template root for on-demand reading without adding tools', async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), 'dynamic-runtime-'));
   const agentDir = join(cwd, 'agent');
   const previous = process.env.PI_CODING_AGENT_DIR;
@@ -46,11 +46,12 @@ test('real Pi runtime creates the template root and expands its authored content
   const messages = await session.extensionRunner.emitContext(original);
   assert.equal(messages[0].customType, 'dynamic-skill:context');
   assert.match(messages[0].content, /## Dynamic skills/);
-  assert.match(messages[0].content, /Persistent authored root body/);
-  assert.equal(messages[0].content.split("Dynamic skills preserve reusable knowledge").length - 1, 1);
+  assert.doesNotMatch(messages[0].content, /Persistent authored root body/);
+  assert.doesNotMatch(messages[0].content, /Dynamic skills preserve reusable knowledge/);
   assert.deepEqual(messages.slice(1), original);
   const catalog = formatSkillsForPrompt(skills);
   assert.match(catalog, /<name>dynamic-skill<\/name>/);
+  assert.match(catalog, /saving new reusable knowledge or memories/);
   assert.ok(catalog.includes(root));
   assert.doesNotMatch(catalog, /Persistent authored root body/);
   assert.equal(session.messages.length, 0, 'context projection must not append durable history');

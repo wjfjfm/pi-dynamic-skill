@@ -178,6 +178,22 @@ export function isManagedSkill(rootPaths: string[], filePath: string): boolean {
   });
 }
 
+/** Direct children of recognized roots, never grandchildren or symlink targets. */
+export function listTopLevelSkills(rootPaths: string[]): string[] {
+  const paths = new Set<string>();
+  for (const root of rootPaths) {
+    if (!isManagedSkill(rootPaths, root)) continue;
+    const directory = join(dirname(root), "skills");
+    if (!existsSync(directory)) continue;
+    for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, "en"))) {
+      if (!entry.isDirectory()) continue;
+      const filePath = join(directory, entry.name, "SKILL.md");
+      if (isManagedSkill(rootPaths, filePath)) paths.add(filePath);
+    }
+  }
+  return [...paths];
+}
+
 export function synchronizeTrees(rootPaths: string[]): TreeResult {
   const paths = [...new Set(rootPaths)];
   const diagnostics: string[] = [];

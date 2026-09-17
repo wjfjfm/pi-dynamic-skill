@@ -37,8 +37,9 @@ test('startup and reload load capacity; compact uses the loaded value; shrinking
   const config = join(cwd, 'dynamic-skill.json');
   writeFileSync(config, '{"capacity":3}');
   const root = join(cwd, 'skills', 'dynamic-skill', 'SKILL.md');
-  const paths = ['a', 'b', 'c'].map((name) => join(dirname(root), 'skills', name, 'SKILL.md'));
-  for (const path of [root, ...paths]) {
+  const group = join(dirname(root), 'skills', 'group', 'SKILL.md');
+  const paths = ['a', 'b', 'c'].map((name) => join(dirname(group), 'skills', name, 'SKILL.md'));
+  for (const path of [root, group, ...paths]) {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, `---\nname: ${dirname(path).split('/').at(-1)}\ndescription: Test\n---\n`);
   }

@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { isManagedSkill, refreshWrittenSkill, synchronizeTrees } from "./tree.js";
+import { isManagedSkill, listTopLevelSkills, refreshWrittenSkill, synchronizeTrees } from "./tree.js";
 import { ACCESS_NOTICE, ACCESS_STATE, ACTIVE_CAPACITY, latestAccessState, noticeWasShown, settleAccesses } from "./access.js";
 import { DYNAMIC_CONTEXT, formatDynamicSkills } from "./prompt.js";
 import { loadConfig } from "./config.js";
@@ -29,7 +29,8 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
       try {
         const roots = [...new Set(discover())];
         const state = latestAccessState(ctx.sessionManager.getBranch())?.state;
-        const count = (paths: readonly string[] = []) => paths.filter((path) => !roots.includes(path)).length;
+        const pinned = new Set([...roots, ...listTopLevelSkills(roots)]);
+        const count = (paths: readonly string[] = []) => paths.filter((path) => !pinned.has(path)).length;
         const message = ["Dynamic skills", "", "Root Skills",
           ...(roots.length ? roots.map((path) => dirname(path)) : ["None."]), "",
           `Active: ${count(state?.active)} / ${capacity}`,
@@ -52,7 +53,7 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
   };
   const settle = (ctx: ExtensionContext, roots: string[]) => {
     try {
-      const rootPaths = new Set(roots);
+      const rootPaths = new Set([...roots, ...listTopLevelSkills(roots)]);
       const state = settleAccesses(ctx.sessionManager.getBranch(), (path) => resolveToolPath(path, ctx.cwd), (path) => !rootPaths.has(path) && isManagedSkill(roots, path), capacity);
       pi.appendEntry(ACCESS_STATE, state);
     } catch (error) {
