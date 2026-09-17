@@ -75,7 +75,7 @@ Navigation updates read the file, compute a replacement for the generated block,
 
 Read tracking and persistent active-skill context management are not implemented yet.
 
-The binary-progressive LRU ordering algorithm is implemented in `src/lru.ts`: a new skill enters at index `floor(N / 2)`; accessing an existing skill at index `i` promotes it to `floor(i / 2)`. Indexes start at zero, the head is most protected, and crossed entries shift back one position. Skills are identified by normalized absolute file paths. This algorithm is not yet wired to reads, session persistence, eviction notices, or compact/reload eviction.
+The binary-progressive LRU ordering algorithm is implemented in `src/lru.ts`: a new skill enters at index `floor(N / 2)`; accessing an existing skill at index `i` promotes it to `floor(i / 2)`. Indexes start at zero, the head is most protected, and crossed entries shift back one position. Skills are identified by normalized absolute file paths. `accessSkillState` maintains separate active and pending-eviction collections with an explicit active capacity. A pending skill is readmitted at `floor(active.length / 2)`; active overflow moves to pending. With 20 active skills, the active tail promotes to index 9, while a pending or new skill enters at index 10. This algorithm is not yet wired to reads, session persistence, eviction notices, or compact/reload eviction.
 
 Already-read child content remains an ordinary tool result in history. Refreshing the root or changing a file does not rewrite previous tool results. This extension does not compact conversation history.
 
