@@ -4,6 +4,13 @@
   "private": true,
   "description": "Dynamic skill loading and replacement for Pi",
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/skills.d.ts",
+      "import": "./dist/skills.js"
+    }
+  },
+  "files": ["dist", "src", "tsconfig.json", "tsconfig.build.json", "README.md", "README.zh-CN.md"],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/wjfjfm/pi-dynamic-skill.git"
@@ -15,9 +22,13 @@
     "@earendil-works/pi-coding-agent": "^0.85.1"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "prepare": "npm run build",
+    "test": "npm run build && node --test test/*.test.mjs"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "@earendil-works/pi-coding-agent": "0.85.1",
     "typescript": "5.9.3"
   }

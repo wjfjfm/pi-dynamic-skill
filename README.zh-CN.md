@@ -17,13 +17,31 @@
 
 ## 当前状态
 
-目前仅包含扩展框架。动态装载、动态替换、持久化和集成 API 尚未实现。加载扩展目前不会注册工具或改变上下文。
+包接口已支持创建 skill 文件，并使用 Pi 原生解析器重新加载目录元数据。导入包不会注册工具或改变上下文。自动上下文注入与替换尚未实现，独立扩展入口仍为框架。
+
+## 包接口
+
+```ts
+import { createSkill, reloadSkills } from "pi-dynamic-skill";
+
+const skill = await createSkill(sessionSkillsDirectory, {
+  name: "backtrack-20260917-153042-123",
+  description: "排查重试行为时查阅。",
+  content: "已排除数据库问题，重试行为仍待验证。",
+});
+const { skills, diagnostics } = reloadSkills(sessionSkillsDirectory);
+```
+
+调用方提供存储目录，并决定何时重新加载和注入返回的元数据。`createSkill` 遇到同名 skill 时抛出 `SkillExistsError`；已有文件可以通过普通文件工具更新，下次 reload 会重新读取。通过返回的 `filePath` 读取完整内容。无需增加模型 Tool，也无需扩展间事件总线。
+
+作为 Git 依赖安装时，`prepare` 会构建 JavaScript 和 TypeScript 类型声明。
 
 ## 开发
 
 ```sh
 npm ci
 npm run typecheck
+npm test
 ```
 
 在 Pi 中加载本地框架：

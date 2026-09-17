@@ -17,13 +17,31 @@ Knowledge generation belongs to the caller. For example, [pi-backtrack](https://
 
 ## Status
 
-Initial extension scaffold only. Runtime loading, replacement, persistence, and the integration API are not implemented yet. Loading the extension currently registers no tools and changes no context.
+The package API creates file-backed skills and reloads directory metadata using Pi’s native skill parser. Importing the package does not register tools or change context. Automatic context injection and replacement are not implemented yet; the standalone extension entry remains a scaffold.
+
+## Package API
+
+```ts
+import { createSkill, reloadSkills } from "pi-dynamic-skill";
+
+const skill = await createSkill(sessionSkillsDirectory, {
+  name: "backtrack-20260917-153042-123",
+  description: "Consult when investigating retry behavior.",
+  content: "Database issues ruled out. Retry behavior remains unverified.",
+});
+const { skills, diagnostics } = reloadSkills(sessionSkillsDirectory);
+```
+
+The caller supplies the directory and decides when to reload and inject the returned metadata. `createSkill` refuses duplicate names with `SkillExistsError`; existing files can be updated with ordinary file tools and rediscovered on the next reload. Reading the returned `filePath` retrieves the full content. No additional model tool or extension event bus is required.
+
+Git dependency installation builds the JavaScript and TypeScript declarations through `prepare`.
 
 ## Development
 
 ```sh
 npm ci
 npm run typecheck
+npm test
 ```
 
 Load the local scaffold in Pi:
