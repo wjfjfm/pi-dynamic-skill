@@ -4,7 +4,7 @@
 
 Dynamic skill loading and replacement for [Pi](https://github.com/earendil-works/pi), with **no additional tools**.
 
-The extension automatically expands the `dynamic-skill` root skill. Each skill contains a generated index of its direct children, so an agent can navigate the tree with ordinary `read` calls. Agents create and update skills with Pi's existing `write` and `edit` tools.
+The `dynamic-skill` root follows Pi’s normal on-demand skill loading: only its name, description, and path are listed by default. Its body is not automatically expanded. Each skill contains a generated index of its direct children, so an agent can navigate the tree with ordinary `read` calls. Agents create and update skills with Pi's existing `write` and `edit` tools.
 
 ## Install
 
@@ -60,8 +60,8 @@ Only direct children are listed. The extension preserves text outside the block,
 
 ## Runtime behavior
 
-- The root body and its direct-child index are automatically injected before every model request, including successive tool rounds. Child bodies are not automatically expanded.
-- The extension replaces its own injected view with the latest files; it does not append repeated copies to durable conversation history.
+- Neither root nor child bodies are automatically injected. Read the root when relevant, then follow its child links as needed. Give the root a description that explains what its tree contains and when to consult it.
+- The extension maintains skill files without injecting messages or modifying conversation history.
 - Before a managed `read`, indexes are refreshed. Before `write` or `edit`, paths, metadata, and generated-block ownership are checked. Skill edits require unique exact matches (with line-ending normalization).
 - Successful managed writes and edits refresh parent indexes. Ordinary files outside the tree are unaffected. Supporting files inside a skill are also ordinary files.
 - Full scans on startup/reload, before requests, and at turn completion reconcile changes made through `bash` or external editors. These writes are not intercepted; invalid nodes are diagnosed during scanning.

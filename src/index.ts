@@ -5,7 +5,6 @@ import { dirname, join, resolve } from "node:path";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { managedBlock, managedTarget, synchronizeTrees, validateChange } from "./tree.js";
 
-const CONTEXT_TYPE = "dynamic-skill:roots";
 function resolveToolPath(path: string, cwd: string): string {
   const normalized = path.replace(/^@/, "").replace(/[\u00a0\u2007\u202f]/g, " ");
   return resolve(cwd, normalized === "~" ? homedir() : normalized.startsWith("~/") ? homedir() + normalized.slice(1) : normalized);
@@ -74,17 +73,9 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
     rootPaths = (event.systemPromptOptions.skills ?? []).filter((skill) => skill.name === "dynamic-skill" && !skill.disableModelInvocation).map((skill) => skill.filePath);
     sync(ctx);
   });
-  pi.on("context", (event, ctx) => {
-    const { roots, diagnostics } = sync(ctx);
-    const messages = event.messages.filter((message) => !(message.role === "custom" && message.customType === CONTEXT_TYPE));
-    if (!roots.length && !diagnostics.length) return { messages };
-    const content = [
-      "Dynamic skills: the root skill below is automatically loaded. Use read to load child skills only when needed. Resolve each child link relative to its parent SKILL.md directory.",
-      "Create child skills at skills/<name>/SKILL.md inside a parent skill. Each SKILL.md requires YAML name (matching its directory) and description; custom body may be empty. write creates directories automatically. Do not write or edit the generated dynamic-skill block; edit child metadata instead.",
-      ...roots.map((root) => `Root skill: ${root.filePath}\nRelative paths are based on ${dirname(root.filePath)}.\n\n${root.body}`),
-      ...(diagnostics.length ? [`Dynamic skill diagnostics:\n${diagnostics.join("\n")}`] : []),
-    ].join("\n\n");
-    return { messages: [...messages, { role: "custom" as const, customType: CONTEXT_TYPE, content, display: false, timestamp: 0 }] };
+  pi.on("context", (_event, ctx) => {
+    // Maintain files without injecting skill bodies or changing conversation history.
+    sync(ctx);
   });
   pi.on("tool_call", (event, ctx) => {
     const input: Record<string, unknown> = event.input;

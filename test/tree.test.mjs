@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile, stat, symlink } from 'node:fs/
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { test } from 'node:test';
-import { loadSkillsFromDir, createReadToolDefinition, createWriteToolDefinition, createEditToolDefinition, convertToLlm } from '@earendil-works/pi-coding-agent';
+import { loadSkillsFromDir, createReadToolDefinition, createWriteToolDefinition, createEditToolDefinition } from '@earendil-works/pi-coding-agent';
 import extension from '../dist/index.js';
 import { synchronizeTrees, START, END } from '../dist/tree.js';
 
@@ -87,26 +87,26 @@ test('native write/edit/read update parent indexes without registering tools', a
   assert.equal((await h.call('write', { path: join(h.cwd, 'unrelated', 'SKILL.md'), content: 'not YAML' })).block, undefined);
 });
 
-test('context auto-loads only root bodies and replaces its own projection', async (t) => {
+test('context maintains indexes without loading roots or children until read', async (t) => {
   const h = await harness(t);
   await h.write(h.child('testing'), skill('testing', 'Child navigation', 'SECRET_CHILD_BODY'));
   const options = { skills: [{ name: 'dynamic-skill', filePath: h.root, disableModelInvocation: false }] };
-  h.hooks.get('before_agent_start')({ systemPromptOptions: options }, h.ctx);
-  const original = [{ role: 'user', content: 'Task', timestamp: 1 }];
-  const first = h.hooks.get('context')({ messages: original }, h.ctx);
-  assert.equal(original.length, 1);
-  assert.equal(first.messages.length, 2);
-  assert.match(first.messages[1].content, /My own instructions/);
-  assert.match(first.messages[1].content, /Child navigation/);
-  assert.doesNotMatch(first.messages[1].content, /SECRET_CHILD_BODY/);
-  assert.equal(convertToLlm(first.messages).length, 2);
-  await h.write(h.child('testing'), skill('testing', 'Fresh navigation'));
-  const second = h.hooks.get('context')({ messages: first.messages }, h.ctx);
-  assert.equal(second.messages.length, 2);
-  assert.match(second.messages[1].content, /Fresh navigation/);
-  assert.doesNotMatch(second.messages[1].content, /Child navigation/);
-  h.hooks.get('before_agent_start')({ systemPromptOptions: { skills: [] } }, h.ctx);
-  assert.deepEqual(h.hooks.get('context')({ messages: second.messages }, h.ctx).messages, original);
+  assert.equal(h.hooks.get('before_agent_start')({ systemPromptOptions: options }, h.ctx), undefined);
+  const messages = [{ role: 'user', content: 'Task', timestamp: 1 }];
+  const snapshot = structuredClone(messages);
+  assert.equal(h.hooks.get('context')({ messages }, h.ctx), undefined);
+  assert.deepEqual(messages, snapshot);
+  await h.write(h.child('testing'), skill('testing', 'Fresh navigation', 'SECRET_CHILD_BODY'));
+  assert.equal(h.hooks.get('context')({ messages }, h.ctx), undefined);
+  assert.deepEqual(messages, snapshot);
+  assert.match(await readFile(h.root, 'utf8'), /Fresh navigation/);
+  const rootRead = await h.call('read', { path: h.root });
+  const text = rootRead.content.map((part) => part.text ?? '').join('');
+  assert.match(text, /My own instructions/);
+  assert.match(text, /Fresh navigation/);
+  assert.doesNotMatch(text, /SECRET_CHILD_BODY/);
+  const childRead = await h.call('read', { path: h.child('testing') });
+  assert.match(childRead.content.map((part) => part.text ?? '').join(''), /SECRET_CHILD_BODY/);
 });
 
 test('invalid, incomplete, and symlinked nodes are diagnosed without erasing authored files', async (t) => {

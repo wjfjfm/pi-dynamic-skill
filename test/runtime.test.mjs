@@ -3,9 +3,9 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
-import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
+import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager, formatSkillsForPrompt } from '@earendil-works/pi-coding-agent';
 
-test('real Pi runtime discovers a persistent blank root and auto-expands it without extra tools', async (t) => {
+test('real Pi runtime discovers a persistent blank root without auto-expanding it or adding tools', async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), 'dynamic-runtime-'));
   const agentDir = join(cwd, 'agent');
   const previous = process.env.PI_CODING_AGENT_DIR;
@@ -33,8 +33,13 @@ test('real Pi runtime discovers a persistent blank root and auto-expands it with
   assert.deepEqual([...loader.getExtensions().extensions[0].tools], []);
   await writeFile(root, source + '\nPersistent authored root body.\n');
   await session.extensionRunner.emitBeforeAgentStart('test', undefined, '', { cwd, skills });
-  const messages = await session.extensionRunner.emitContext([{ role: 'user', content: 'Task', timestamp: 0 }]);
-  assert.match(messages.at(-1).content, /Persistent authored root body/);
+  const original = [{ role: 'user', content: 'Task', timestamp: 0 }];
+  const messages = await session.extensionRunner.emitContext(original);
+  assert.deepEqual(messages, original);
+  const catalog = formatSkillsForPrompt(skills);
+  assert.match(catalog, /<name>dynamic-skill<\/name>/);
+  assert.ok(catalog.includes(root));
+  assert.doesNotMatch(catalog, /Persistent authored root body/);
   assert.equal(session.messages.length, 0, 'context projection must not append durable history');
   assert.deepEqual(errors, []);
 });
