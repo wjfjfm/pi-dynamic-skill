@@ -28,7 +28,7 @@ async function harness(t) {
   extension(pi);
   const ctx = { cwd: f.cwd, hasUI: true, sessionManager: { getBranch: () => [] }, ui: { notify: (...args) => warnings.push(args) } };
   await hooks.get('resources_discover')({ reason: 'startup' }, ctx);
-  assert.deepEqual([...hooks.keys()].sort(), ['resources_discover', 'session_compact', 'tool_result']);
+  assert.deepEqual([...hooks.keys()].sort(), ['context', 'resources_discover', 'session_compact', 'tool_result']);
   const native = { read: createReadToolDefinition(f.cwd), write: createWriteToolDefinition(f.cwd), edit: createEditToolDefinition(f.cwd) };
   let sequence = 0;
   const call = async (toolName, input) => {

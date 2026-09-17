@@ -35,7 +35,10 @@ test('real Pi runtime discovers a persistent blank root without auto-expanding i
   await session.extensionRunner.emitBeforeAgentStart('test', undefined, '', { cwd, skills });
   const original = [{ role: 'user', content: 'Task', timestamp: 0 }];
   const messages = await session.extensionRunner.emitContext(original);
-  assert.deepEqual(messages, original);
+  assert.equal(messages[0].customType, 'dynamic-skill:context');
+  assert.match(messages[0].content, /## Dynamic skills/);
+  assert.doesNotMatch(messages[0].content, /Persistent authored root body/);
+  assert.deepEqual(messages.slice(1), original);
   const catalog = formatSkillsForPrompt(skills);
   assert.match(catalog, /<name>dynamic-skill<\/name>/);
   assert.ok(catalog.includes(root));

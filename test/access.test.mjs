@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
-import { ACCESS_STATE, settleAccesses } from '../dist/access.js';
+import { ACCESS_NOTICE, ACCESS_STATE, settleAccesses } from '../dist/access.js';
 import extension from '../dist/index.js';
 
 function record(manager, id, name, path, isError = false) {
@@ -46,6 +46,20 @@ test('latest successful access determines batch order; another branch does not l
   manager.branch(fork);
   record(manager, '4', 'read', '/C');
   assert.deepEqual(settleAccesses(manager.getBranch(), (p) => p, () => true).active, ['/C', '/A']);
+});
+
+test('only announced unaccessed pending skills expire; fresh overflow gets another interval', () => {
+  const manager = SessionManager.inMemory('/');
+  const id = manager.appendCustomEntry(ACCESS_STATE, { version: 1, active: ['/A', '/B'], pendingEviction: ['/C', '/D', '/hidden'] });
+  manager.appendCustomEntry(ACCESS_NOTICE, { settlementId: id, paths: ['/C', '/D'] });
+  record(manager, '1', 'read', '/C');
+  const state = settleAccesses(manager.getBranch(), (p) => p, () => true, 2);
+  assert.deepEqual(state.active, ['/A', '/C']);
+  assert.deepEqual(state.pendingEviction, ['/hidden', '/B']);
+  const next = manager.appendCustomEntry(ACCESS_STATE, state);
+  assert.deepEqual(settleAccesses(manager.getBranch(), (p) => p, () => true, 2), state, 'unshown notices survive reload');
+  manager.appendCustomEntry(ACCESS_NOTICE, { settlementId: next, paths: ['/B'] });
+  assert.deepEqual(settleAccesses(manager.getBranch(), (p) => p, () => true, 2).pendingEviction, ['/hidden']);
 });
 
 test('extension settles on successful compact and reload, never on tool results', async (t) => {

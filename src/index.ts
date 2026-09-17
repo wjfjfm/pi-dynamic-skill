@@ -4,7 +4,8 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { isManagedSkill, refreshWrittenSkill, synchronizeTrees } from "./tree.js";
-import { ACCESS_STATE, settleAccesses } from "./access.js";
+import { ACCESS_NOTICE, ACCESS_STATE, latestAccessState, noticeWasShown, settleAccesses } from "./access.js";
+import { DYNAMIC_CONTEXT, formatDynamicSkills } from "./prompt.js";
 
 function resolveToolPath(path: string, cwd: string): string {
   const normalized = path.replace(/^@/, "").replace(/[\u00a0\u2007\u202f]/g, " ");
@@ -12,6 +13,7 @@ function resolveToolPath(path: string, cwd: string): string {
 }
 
 export default function dynamicSkill(pi: ExtensionAPI): void {
+  let projection: { key: string; content: string; pendingPaths: string[] } | undefined;
   const discover = () => pi.getCommands().filter((command) => command.source === "skill" && command.name === "skill:dynamic-skill").map((command) => command.sourceInfo.path);
   const settle = (ctx: ExtensionContext, roots: string[]) => {
     try {
@@ -24,7 +26,29 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
     }
   };
   pi.on("session_compact", (_event, ctx) => settle(ctx, discover()));
+  pi.on("context", (event, ctx) => {
+    try {
+      const branch = ctx.sessionManager.getBranch();
+      const snapshot = latestAccessState(branch);
+      const roots = discover();
+      const key = JSON.stringify([ctx.sessionManager.getSessionId(), snapshot?.id, roots]);
+      if (projection?.key !== key) {
+        projection = { key, ...formatDynamicSkills(snapshot?.state ?? { active: [], pendingEviction: [] }, roots) };
+      }
+      if (snapshot?.state.pendingEviction.length && !noticeWasShown(branch, snapshot.id)) {
+        pi.appendEntry(ACCESS_NOTICE, { settlementId: snapshot.id, paths: projection.pendingPaths });
+      }
+      return { messages: [{ role: "custom" as const, customType: DYNAMIC_CONTEXT,
+        content: projection.content, display: false, timestamp: 0 },
+      ...event.messages.filter((message) => message.role !== "custom" || message.customType !== DYNAMIC_CONTEXT)] };
+    } catch (error) {
+      const message = `[dynamic-skill] Context loading failed: ${error instanceof Error ? error.message : String(error)}`;
+      if (ctx.hasUI) ctx.ui.notify(message, "warning");
+      else process.stderr.write(message + "\n");
+    }
+  });
   pi.on("resources_discover", async (_event, ctx) => {
+    projection = undefined;
     const warn = (diagnostics: string[]) => {
       const message = `[dynamic-skill] Skill warnings\n${diagnostics.map((line) => `  ${line}`).join("\n")}`;
       if (ctx.hasUI) ctx.ui.notify(message, "warning");

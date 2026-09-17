@@ -2,6 +2,7 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { accessSkillState, type SkillLruState } from "./lru.js";
 
 export const ACCESS_STATE = "dynamic-skill:access-state";
+export const ACCESS_NOTICE = "dynamic-skill:eviction-notice";
 export const ACTIVE_CAPACITY = 20;
 export interface AccessState extends SkillLruState { version: 1 }
 
@@ -16,6 +17,20 @@ function restore(data: unknown): AccessState {
   return value as AccessState;
 }
 
+export function latestAccessState(branch: SessionEntry[]): { id: string; state: AccessState } | undefined {
+  for (let i = branch.length - 1; i >= 0; i--) {
+    const entry = branch[i]!;
+    if (entry.type === "custom" && entry.customType === ACCESS_STATE) return { id: entry.id, state: restore(entry.data) };
+  }
+  return undefined;
+}
+
+export function noticeWasShown(branch: SessionEntry[], settlementId: string): boolean {
+  return branch.some((entry) => entry.type === "custom" && entry.customType === ACCESS_NOTICE
+    && typeof entry.data === "object" && entry.data !== null && "settlementId" in entry.data
+    && entry.data.settlementId === settlementId);
+}
+
 /** Settle only the current branch since its latest persisted settlement. */
 export function settleAccesses(
   branch: SessionEntry[], resolvePath: (path: string) => string,
@@ -23,11 +38,19 @@ export function settleAccesses(
 ): AccessState {
   let state: SkillLruState = { active: [], pendingEviction: [] };
   let boundary = -1;
+  let announced = new Set<string>();
   for (let i = branch.length - 1; i >= 0; i--) {
     const entry = branch[i]!;
     if (entry.type === "custom" && entry.customType === ACCESS_STATE) {
       state = restore(entry.data);
       boundary = i;
+      for (const notice of branch.slice(i + 1)) {
+        if (notice.type !== "custom" || notice.customType !== ACCESS_NOTICE) continue;
+        const data = notice.data as { settlementId?: unknown; paths?: unknown } | undefined;
+        if (data?.settlementId === entry.id && Array.isArray(data.paths)) {
+          for (const path of data.paths) if (typeof path === "string") announced.add(path);
+        }
+      }
       break;
     }
   }
@@ -58,6 +81,8 @@ export function settleAccesses(
   for (const path of accesses.keys()) {
     if (eligible(path)) state = accessSkillState(state, path, capacity);
   }
-  // Expiration is deferred until the notice/context presentation is connected.
-  return { version: 1, ...state };
+  // Only previously announced, unaccessed candidates expire. New overflow gets
+  // its own notice interval, even if an accessed candidate overflows again.
+  return { version: 1, active: state.active,
+    pendingEviction: state.pendingEviction.filter((path) => !announced.has(path) || accesses.has(path)) };
 }
