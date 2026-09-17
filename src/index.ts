@@ -2,8 +2,9 @@ import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { refreshWrittenSkill, synchronizeTrees } from "./tree.js";
+import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { isManagedSkill, refreshWrittenSkill, synchronizeTrees } from "./tree.js";
+import { ACCESS_STATE, settleAccesses } from "./access.js";
 
 function resolveToolPath(path: string, cwd: string): string {
   const normalized = path.replace(/^@/, "").replace(/[\u00a0\u2007\u202f]/g, " ");
@@ -12,6 +13,17 @@ function resolveToolPath(path: string, cwd: string): string {
 
 export default function dynamicSkill(pi: ExtensionAPI): void {
   const discover = () => pi.getCommands().filter((command) => command.source === "skill" && command.name === "skill:dynamic-skill").map((command) => command.sourceInfo.path);
+  const settle = (ctx: ExtensionContext, roots: string[]) => {
+    try {
+      const state = settleAccesses(ctx.sessionManager.getBranch(), (path) => resolveToolPath(path, ctx.cwd), (path) => isManagedSkill(roots, path));
+      pi.appendEntry(ACCESS_STATE, state);
+    } catch (error) {
+      const message = `[dynamic-skill] Access settlement failed: ${error instanceof Error ? error.message : String(error)}`;
+      if (ctx.hasUI) ctx.ui.notify(message, "warning");
+      else process.stderr.write(message + "\n");
+    }
+  };
+  pi.on("session_compact", (_event, ctx) => settle(ctx, discover()));
   pi.on("resources_discover", async (_event, ctx) => {
     const warn = (diagnostics: string[]) => {
       const message = `[dynamic-skill] Skill warnings\n${diagnostics.map((line) => `  ${line}`).join("\n")}`;
@@ -36,6 +48,7 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
       }
       const { diagnostics } = synchronizeTrees(roots);
       if (diagnostics.length) warn(diagnostics);
+      if (_event.reason === "reload") settle(ctx, roots);
       if (skillPaths) return { skillPaths };
     } catch (error) {
       // Resource maintenance must never prevent the session from starting.

@@ -163,6 +163,16 @@ function inspectSkill(root: string, filePath: string): string[] {
   return diagnostics;
 }
 
+/** Read-only eligibility check used when settling recorded accesses. */
+export function isManagedSkill(rootPaths: string[], filePath: string): boolean {
+  if (basename(filePath) !== "SKILL.md") return false;
+  return rootPaths.some((root) => {
+    const rel = relative(dirname(root), filePath);
+    if (rel === ".." || rel.startsWith(`..${sep}`) || rel.startsWith(sep)) return false;
+    try { return inspectSkill(root, filePath).length === 0; } catch { return false; }
+  });
+}
+
 export function synchronizeTrees(rootPaths: string[]): TreeResult {
   const paths = [...new Set(rootPaths)];
   const diagnostics: string[] = [];
