@@ -14,7 +14,9 @@ export function formatDynamicSkills(state: SkillLruState, roots: string[]): { co
   const rootSkills = load(topLevel).filter((skill) => !skill.disableModelInvocation);
   const active = load(state.active.filter((path) => !rootPaths.has(path)));
   const pending = load(state.pendingEviction.filter((path) => !rootPaths.has(path))).filter((skill) => !skill.disableModelInvocation);
-  return { pendingPaths: pending.map((skill) => skill.filePath), content: `## Dynamic skills
+  return { pendingPaths: pending.map((skill) => skill.filePath), content: `[dynamic-skill extention: ON]
+
+## Dynamic skills
 
 ### Root Skills
 ${formatSkillsForPrompt(rootSkills) || "\nNone."}

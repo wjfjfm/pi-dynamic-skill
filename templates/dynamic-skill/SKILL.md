@@ -1,6 +1,6 @@
 ---
 name: dynamic-skill
-description: Use when saving new reusable knowledge or memories, creating dynamic skills, or organizing, merging, moving, and updating the dynamic skill tree.
+description: "dynamic-skill is an LRU-managed dynamic skill loader. Use it only when the context contains [dynamic-skill extention: ON]. Read when saving exploration findings, trial-and-error experience, important information, or reusable methods as dynamic skills, or when creating, organizing, merging, or correcting the skill tree within dynamic-skill directories."
 ---
 
 Dynamic skills preserve reusable knowledge in a multi-level skill tree.

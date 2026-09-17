@@ -45,13 +45,13 @@ test('real Pi runtime creates the template root for on-demand reading without ad
   const original = [{ role: 'user', content: 'Task', timestamp: 0 }];
   const messages = await session.extensionRunner.emitContext(original);
   assert.equal(messages[0].customType, 'dynamic-skill:context');
-  assert.match(messages[0].content, /## Dynamic skills/);
+  assert.match(messages[0].content, /^\[dynamic-skill extention: ON\]\n\n## Dynamic skills/);
   assert.doesNotMatch(messages[0].content, /Persistent authored root body/);
   assert.doesNotMatch(messages[0].content, /Dynamic skills preserve reusable knowledge/);
   assert.deepEqual(messages.slice(1), original);
   const catalog = formatSkillsForPrompt(skills);
   assert.match(catalog, /<name>dynamic-skill<\/name>/);
-  assert.match(catalog, /saving new reusable knowledge or memories/);
+  assert.match(catalog, /Use it only when the context contains \[dynamic-skill extention: ON\]/);
   assert.ok(catalog.includes(root));
   assert.doesNotMatch(catalog, /Persistent authored root body/);
   assert.equal(session.messages.length, 0, 'context projection must not append durable history');
