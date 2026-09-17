@@ -66,6 +66,7 @@ Navigation updates read the file, compute a replacement for the generated block,
 
 - Neither root nor child bodies are automatically injected. Read the root when relevant, then follow its child links as needed. Give the root a description that explains what its tree contains and when to consult it.
 - The extension maintains skill files without injecting messages or modifying conversation history.
+- Startup and `/reload` scan the entire managed tree. Invalid skills are reported as `[dynamic-skill] Skill warnings` through Pi's warning UI (stderr without a UI), without blocking the session. Generated child navigation is repaired silently; malformed marker boundaries are reported because replacing them could erase authored text. Unexpected initialization failures also become warnings.
 - After a successful `write` or `edit` to a managed `SKILL.md`, validate the actual file and refresh only that node and its direct parent's index. Other branches are not rewritten.
 - Invalid skill metadata or paths append a `[dynamic-skill]` diagnostic to the original tool result. The file remains written and the tool's success status, existing content blocks, and details are preserved. Invalid children are removed from the parent's index when it can be refreshed.
 - Writes and edits are not intercepted or blocked. Changes to generated text are overwritten by regeneration. Malformed marker pairs are reported without guessing which author text to replace.

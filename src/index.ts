@@ -13,24 +13,34 @@ function resolveToolPath(path: string, cwd: string): string {
 export default function dynamicSkill(pi: ExtensionAPI): void {
   const discover = () => pi.getCommands().filter((command) => command.source === "skill" && command.name === "skill:dynamic-skill").map((command) => command.sourceInfo.path);
   pi.on("resources_discover", async (_event, ctx) => {
-    const roots = discover();
-    let skillPaths: string[] | undefined;
-    if (!roots.length) {
-      const root = join(getAgentDir(), "skills", "dynamic-skill", "SKILL.md");
-      if (!existsSync(root)) {
-        try {
-          await mkdir(dirname(root), { recursive: true });
-          await writeFile(root, "---\nname: dynamic-skill\ndescription: Entry point for dynamically loaded skills. Follow child skill links when relevant to the task.\n---\n", { flag: "wx" });
-        } catch (error) {
-          if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
+    const warn = (diagnostics: string[]) => {
+      const message = `[dynamic-skill] Skill warnings\n${diagnostics.map((line) => `  ${line}`).join("\n")}`;
+      if (ctx.hasUI) ctx.ui.notify(message, "warning");
+      else process.stderr.write(message + "\n");
+    };
+    try {
+      const roots = discover();
+      let skillPaths: string[] | undefined;
+      if (!roots.length) {
+        const root = join(getAgentDir(), "skills", "dynamic-skill", "SKILL.md");
+        if (!existsSync(root)) {
+          try {
+            await mkdir(dirname(root), { recursive: true });
+            await writeFile(root, "---\nname: dynamic-skill\ndescription: Entry point for dynamically loaded skills. Follow child skill links when relevant to the task.\n---\n", { flag: "wx" });
+          } catch (error) {
+            if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
+          }
         }
+        roots.push(root);
+        skillPaths = [root];
       }
-      roots.push(root);
-      skillPaths = [root];
+      const { diagnostics } = synchronizeTrees(roots);
+      if (diagnostics.length) warn(diagnostics);
+      if (skillPaths) return { skillPaths };
+    } catch (error) {
+      // Resource maintenance must never prevent the session from starting.
+      warn([error instanceof Error ? error.message : String(error)]);
     }
-    const { diagnostics } = synchronizeTrees(roots);
-    if (diagnostics.length) ctx.ui.notify(diagnostics.join("\n"), "warning");
-    if (skillPaths) return { skillPaths };
   });
   pi.on("tool_result", (event, ctx) => {
     if (event.isError || !["write", "edit"].includes(event.toolName) || typeof event.input.path !== "string") return;

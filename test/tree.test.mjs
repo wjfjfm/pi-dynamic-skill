@@ -26,7 +26,7 @@ async function harness(t) {
   const pi = { on: (name, handler) => hooks.set(name, handler), getCommands: () => commands,
     registerTool: () => assert.fail('Extension must be tool free') };
   extension(pi);
-  const ctx = { cwd: f.cwd, ui: { notify: (...args) => warnings.push(args) } };
+  const ctx = { cwd: f.cwd, hasUI: true, ui: { notify: (...args) => warnings.push(args) } };
   await hooks.get('resources_discover')({ reason: 'startup' }, ctx);
   assert.deepEqual([...hooks.keys()].sort(), ['resources_discover', 'tool_result']);
   const native = { read: createReadToolDefinition(f.cwd), write: createWriteToolDefinition(f.cwd), edit: createEditToolDefinition(f.cwd) };
@@ -171,4 +171,30 @@ test('every SKILL.md inside the root is checked, even in hidden or misplaced dir
   assert.equal(await readFile(hidden, 'utf8'), 'Not a skill');
   const outside = await h.call('write', { path: join(h.cwd, 'outside', 'SKILL.md'), content: 'Not a skill' });
   assert.equal(outside.content.length, 1);
+});
+
+test('startup warns about invalid skills, silently repairs navigation, and keeps running', async (t) => {
+  const h = await harness(t);
+  await h.write(h.child('valid'), skill('valid', 'Current description'));
+  await h.write(h.child('invalid'), '---\nname: invalid\n---\nAuthor text');
+  await writeFile(h.root, skill('dynamic-skill', 'Root', `${START}\nOutdated navigation\n${END}\nKeep this text.`));
+  const discover = h.hooks.get('resources_discover');
+  await assert.doesNotReject(discover({ reason: 'startup' }, h.ctx));
+  assert.equal(h.warnings.length, 1);
+  assert.equal(h.warnings[0][1], 'warning');
+  assert.match(h.warnings[0][0], /\[dynamic-skill\] Skill warnings/);
+  assert.match(h.warnings[0][0], /invalid\/SKILL.md.*description/);
+  assert.doesNotMatch(h.warnings[0][0], /Outdated navigation|Current description/);
+  const text = await readFile(h.root, 'utf8');
+  assert.match(text, /Current description/);
+  assert.match(text, /Keep this text/);
+  assert.doesNotMatch(text, /Outdated navigation/);
+  await h.write(h.child('invalid'), skill('invalid'));
+  h.warnings.length = 0;
+  await discover({ reason: 'reload' }, h.ctx);
+  assert.deepEqual(h.warnings, []);
+  // Even an unexpected discovery failure is a warning, not an extension error.
+  Object.defineProperty(h.commands[0], 'source', { get() { throw new Error('Discovery unavailable'); } });
+  await assert.doesNotReject(discover({ reason: 'startup' }, h.ctx));
+  assert.match(h.warnings[0][0], /Discovery unavailable/);
 });
