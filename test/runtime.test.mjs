@@ -31,6 +31,15 @@ test('real Pi runtime creates the template root and expands its authored content
   assert.equal(skills.filter((skill) => skill.name === 'dynamic-skill').length, 1);
   assert.equal(skills.find((skill) => skill.name === 'dynamic-skill').filePath, root);
   assert.deepEqual([...loader.getExtensions().extensions[0].tools], []);
+  const command = loader.getExtensions().extensions[0].commands.get('dynamic-skill');
+  assert.ok(command);
+  const notices = [];
+  const branchBefore = session.sessionManager.getBranch();
+  await command.handler('', { sessionManager: session.sessionManager, hasUI: true, ui: { notify: (text) => notices.push(text) } });
+  assert.ok(notices[0].includes(join(agentDir, 'skills', 'dynamic-skill')));
+  assert.match(notices[0], /Active: 0 \/ 20/);
+  assert.match(notices[0], /Pending eviction: 0/);
+  assert.deepEqual(session.sessionManager.getBranch(), branchBefore);
   await writeFile(root, source + '\nPersistent authored root body.\n');
   await session.extensionRunner.emitBeforeAgentStart('test', undefined, '', { cwd, skills });
   const original = [{ role: 'user', content: 'Task', timestamp: 0 }];

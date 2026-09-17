@@ -32,7 +32,7 @@ test('native skill lists, stable context projection, reload refresh and notice-b
   const manager = SessionManager.inMemory(cwd);
   manager.appendCustomEntry(ACCESS_STATE, state);
   const hooks = new Map();
-  extension({ on: (name, handler) => hooks.set(name, handler),
+  extension({ registerCommand: () => {}, on: (name, handler) => hooks.set(name, handler),
     getCommands: () => [{ source: 'skill', name: 'skill:dynamic-skill', sourceInfo: { path: root } }],
     appendEntry: (type, data) => manager.appendCustomEntry(type, data) });
   const ctx = { cwd, sessionManager: manager, hasUI: true, ui: { notify: (text) => assert.fail(text) } };
@@ -80,7 +80,7 @@ test('discovered roots have a fixed native section and never occupy active or pe
     manager.appendMessage({ role: 'toolResult', toolCallId: String(i), toolName: name, isError: false, content: [], timestamp: 0 });
   }
   const hooks = new Map();
-  extension({ on: (name, handler) => hooks.set(name, handler),
+  extension({ registerCommand: () => {}, on: (name, handler) => hooks.set(name, handler),
     getCommands: () => roots.map((path) => ({ source: 'skill', name: 'skill:dynamic-skill', sourceInfo: { path } })),
     appendEntry: (type, data) => manager.appendCustomEntry(type, data) });
   const ctx = { cwd, sessionManager: manager, hasUI: true, ui: { notify: (text) => assert.fail(text) } };

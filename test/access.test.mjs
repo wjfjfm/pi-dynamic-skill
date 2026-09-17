@@ -73,7 +73,7 @@ test('extension settles on successful compact and reload, never on tool results'
   const manager = SessionManager.inMemory(cwd);
   const ctx = { cwd, sessionManager: manager, hasUI: true, ui: { notify: (text) => assert.fail(text) } };
   const hooks = new Map();
-  const install = () => extension({
+  const install = () => extension({ registerCommand: () => {},
     on: (name, handler) => hooks.set(name, handler),
     getCommands: () => [{ source: 'skill', name: 'skill:dynamic-skill', sourceInfo: { path: root } }],
     appendEntry: (type, data) => manager.appendCustomEntry(type, data),
@@ -113,7 +113,7 @@ test('successful compact refreshes moved/deleted skill indexes before settlement
   const hooks = new Map();
   const warnings = [];
   let assertRefreshed = false;
-  extension({ on: (name, handler) => hooks.set(name, handler),
+  extension({ registerCommand: () => {}, on: (name, handler) => hooks.set(name, handler),
     getCommands: () => [{ source: 'skill', name: 'skill:dynamic-skill', sourceInfo: { path: root } }],
     appendEntry: (type, data) => {
       if (assertRefreshed && type === ACCESS_STATE) {

@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { isManagedSkill, refreshWrittenSkill, synchronizeTrees } from "./tree.js";
-import { ACCESS_NOTICE, ACCESS_STATE, latestAccessState, noticeWasShown, settleAccesses } from "./access.js";
+import { ACCESS_NOTICE, ACCESS_STATE, ACTIVE_CAPACITY, latestAccessState, noticeWasShown, settleAccesses } from "./access.js";
 import { DYNAMIC_CONTEXT, formatDynamicSkills } from "./prompt.js";
 
 function resolveToolPath(path: string, cwd: string): string {
@@ -21,6 +21,25 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
     if (ctx.hasUI) ctx.ui.notify(message, "warning");
     else process.stderr.write(message + "\n");
   };
+  pi.registerCommand("dynamic-skill", {
+    description: "Show dynamic skill roots and session status",
+    handler: async (_args, ctx) => {
+      try {
+        const roots = [...new Set(discover())];
+        const state = latestAccessState(ctx.sessionManager.getBranch())?.state;
+        const count = (paths: readonly string[] = []) => paths.filter((path) => !roots.includes(path)).length;
+        const message = ["Dynamic skills", "", "Root Skills",
+          ...(roots.length ? roots.map((path) => dirname(path)) : ["None."]), "",
+          `Active: ${count(state?.active)} / ${ACTIVE_CAPACITY}`,
+          `Pending eviction: ${count(state?.pendingEviction)}`,
+          "Counts reflect the last compact/reload settlement."].join("\n");
+        if (ctx.hasUI) ctx.ui.notify(message, "info");
+        else process.stderr.write(message + "\n");
+      } catch (error) {
+        warn(ctx, [error instanceof Error ? error.message : String(error)]);
+      }
+    },
+  });
   const refresh = (ctx: ExtensionContext, roots: string[]) => {
     projection = undefined;
     try {

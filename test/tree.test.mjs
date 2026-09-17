@@ -23,7 +23,7 @@ async function harness(t) {
   const hooks = new Map();
   const warnings = [];
   const commands = [{ source: 'skill', name: 'skill:dynamic-skill', sourceInfo: { path: f.root } }];
-  const pi = { on: (name, handler) => hooks.set(name, handler), getCommands: () => commands,
+  const pi = { registerCommand: () => {}, on: (name, handler) => hooks.set(name, handler), getCommands: () => commands,
     appendEntry: () => {}, registerTool: () => assert.fail('Extension must be tool free') };
   extension(pi);
   const ctx = { cwd: f.cwd, hasUI: true, sessionManager: { getBranch: () => [] }, ui: { notify: (...args) => warnings.push(args) } };
