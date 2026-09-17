@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
@@ -95,4 +95,49 @@ test('extension settles on successful compact and reload, never on tool results'
   await hooks.get('resources_discover')({ reason: 'reload' }, ctx);
   assert.deepEqual(manager.getLeafEntry().data.active, [resolve(child)]);
   assert.equal(manager.buildSessionContext().messages.some((m) => m.customType === ACCESS_STATE), false);
+});
+
+test('successful compact refreshes moved/deleted skill indexes before settlement and context', async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), 'dynamic-compact-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const root = join(cwd, 'dynamic-skill', 'SKILL.md');
+  const child = (name) => join(root, '..', 'skills', name, 'SKILL.md');
+  const write = (path, name) => {
+    mkdirSync(join(path, '..'), { recursive: true });
+    writeFileSync(path, `---\nname: ${name}\ndescription: ${name} instructions\n---\n`);
+  };
+  write(root, 'dynamic-skill');
+  write(child('old'), 'old');
+  write(child('removed'), 'removed');
+  const manager = SessionManager.inMemory(cwd);
+  const hooks = new Map();
+  const warnings = [];
+  let assertRefreshed = false;
+  extension({ on: (name, handler) => hooks.set(name, handler),
+    getCommands: () => [{ source: 'skill', name: 'skill:dynamic-skill', sourceInfo: { path: root } }],
+    appendEntry: (type, data) => {
+      if (assertRefreshed && type === ACCESS_STATE) {
+        const text = readFileSync(root, 'utf8');
+        assert.match(text, /skills\/moved\/SKILL.md/);
+        assert.doesNotMatch(text, /skills\/(old|removed)\/SKILL.md/);
+      }
+      manager.appendCustomEntry(type, data);
+    } });
+  const ctx = { cwd, sessionManager: manager, hasUI: true, ui: { notify: (text) => warnings.push(text) } };
+  await hooks.get('resources_discover')({ reason: 'startup' }, ctx);
+  manager.appendCustomEntry(ACCESS_STATE, { version: 1, active: [child('old'), child('removed')], pendingEviction: [] });
+  hooks.get('context')({ messages: [] }, ctx);
+  renameSync(join(child('old'), '..'), join(child('moved'), '..'));
+  write(child('moved'), 'moved');
+  rmSync(join(child('removed'), '..'), { recursive: true });
+  write(child('invalid'), 'wrong-name');
+  record(manager, 'moved-read', 'read', child('moved'));
+  assertRefreshed = true;
+  assert.doesNotThrow(() => hooks.get('session_compact')({}, ctx));
+  assert.deepEqual(manager.getLeafEntry().data.active, [child('moved')]);
+  assert.ok(warnings.some((text) => text.includes('invalid/SKILL.md')));
+  const content = hooks.get('context')({ messages: [] }, ctx).messages[0].content;
+  assert.match(content, /<name>moved<\/name>/);
+  assert.doesNotMatch(content, /<name>(old|removed)<\/name>/);
+  assert.equal(hooks.has('session_compact_failed'), false);
 });

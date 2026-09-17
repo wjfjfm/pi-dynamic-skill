@@ -15,6 +15,20 @@ function resolveToolPath(path: string, cwd: string): string {
 export default function dynamicSkill(pi: ExtensionAPI): void {
   let projection: { key: string; content: string; pendingPaths: string[] } | undefined;
   const discover = () => pi.getCommands().filter((command) => command.source === "skill" && command.name === "skill:dynamic-skill").map((command) => command.sourceInfo.path);
+  const warn = (ctx: ExtensionContext, diagnostics: string[]) => {
+    if (!diagnostics.length) return;
+    const message = `[dynamic-skill] Skill warnings\n${diagnostics.map((line) => `  ${line}`).join("\n")}`;
+    if (ctx.hasUI) ctx.ui.notify(message, "warning");
+    else process.stderr.write(message + "\n");
+  };
+  const refresh = (ctx: ExtensionContext, roots: string[]) => {
+    projection = undefined;
+    try {
+      warn(ctx, synchronizeTrees(roots).diagnostics);
+    } catch (error) {
+      warn(ctx, [error instanceof Error ? error.message : String(error)]);
+    }
+  };
   const settle = (ctx: ExtensionContext, roots: string[]) => {
     try {
       const state = settleAccesses(ctx.sessionManager.getBranch(), (path) => resolveToolPath(path, ctx.cwd), (path) => isManagedSkill(roots, path));
@@ -25,7 +39,11 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
       else process.stderr.write(message + "\n");
     }
   };
-  pi.on("session_compact", (_event, ctx) => settle(ctx, discover()));
+  pi.on("session_compact", (_event, ctx) => {
+    const roots = discover();
+    refresh(ctx, roots);
+    settle(ctx, roots);
+  });
   pi.on("context", (event, ctx) => {
     try {
       const branch = ctx.sessionManager.getBranch();
@@ -49,11 +67,6 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
   });
   pi.on("resources_discover", async (_event, ctx) => {
     projection = undefined;
-    const warn = (diagnostics: string[]) => {
-      const message = `[dynamic-skill] Skill warnings\n${diagnostics.map((line) => `  ${line}`).join("\n")}`;
-      if (ctx.hasUI) ctx.ui.notify(message, "warning");
-      else process.stderr.write(message + "\n");
-    };
     try {
       const roots = discover();
       let skillPaths: string[] | undefined;
@@ -70,13 +83,12 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
         roots.push(root);
         skillPaths = [root];
       }
-      const { diagnostics } = synchronizeTrees(roots);
-      if (diagnostics.length) warn(diagnostics);
+      refresh(ctx, roots);
       if (_event.reason === "reload") settle(ctx, roots);
       if (skillPaths) return { skillPaths };
     } catch (error) {
       // Resource maintenance must never prevent the session from starting.
-      warn([error instanceof Error ? error.message : String(error)]);
+      warn(ctx, [error instanceof Error ? error.message : String(error)]);
     }
   });
   pi.on("tool_result", (event, ctx) => {
