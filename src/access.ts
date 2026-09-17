@@ -36,6 +36,7 @@ export function settleAccesses(
   branch: SessionEntry[], resolvePath: (path: string) => string,
   eligible: (path: string) => boolean, capacity = ACTIVE_CAPACITY,
 ): AccessState {
+  if (!Number.isSafeInteger(capacity) || capacity < 1) throw new RangeError("Active skill capacity must be a positive safe integer.");
   let state: SkillLruState = { active: [], pendingEviction: [] };
   let boundary = -1;
   let announced = new Set<string>();
@@ -83,6 +84,6 @@ export function settleAccesses(
   }
   // Only previously announced, unaccessed candidates expire. New overflow gets
   // its own notice interval, even if an accessed candidate overflows again.
-  return { version: 1, active: state.active,
-    pendingEviction: state.pendingEviction.filter((path) => !announced.has(path) || accesses.has(path)) };
+  return { version: 1, active: state.active.slice(0, capacity),
+    pendingEviction: [...state.pendingEviction.filter((path) => !announced.has(path) || accesses.has(path)), ...state.active.slice(capacity)] };
 }

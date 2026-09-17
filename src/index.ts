@@ -6,6 +6,7 @@ import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil
 import { isManagedSkill, refreshWrittenSkill, synchronizeTrees } from "./tree.js";
 import { ACCESS_NOTICE, ACCESS_STATE, ACTIVE_CAPACITY, latestAccessState, noticeWasShown, settleAccesses } from "./access.js";
 import { DYNAMIC_CONTEXT, formatDynamicSkills } from "./prompt.js";
+import { loadConfig } from "./config.js";
 
 function resolveToolPath(path: string, cwd: string): string {
   const normalized = path.replace(/^@/, "").replace(/[\u00a0\u2007\u202f]/g, " ");
@@ -13,6 +14,7 @@ function resolveToolPath(path: string, cwd: string): string {
 }
 
 export default function dynamicSkill(pi: ExtensionAPI): void {
+  let capacity = ACTIVE_CAPACITY;
   let projection: { key: string; content: string; pendingPaths: string[] } | undefined;
   const discover = () => pi.getCommands().filter((command) => command.source === "skill" && command.name === "skill:dynamic-skill").map((command) => command.sourceInfo.path);
   const warn = (ctx: ExtensionContext, diagnostics: string[]) => {
@@ -30,7 +32,7 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
         const count = (paths: readonly string[] = []) => paths.filter((path) => !roots.includes(path)).length;
         const message = ["Dynamic skills", "", "Root Skills",
           ...(roots.length ? roots.map((path) => dirname(path)) : ["None."]), "",
-          `Active: ${count(state?.active)} / ${ACTIVE_CAPACITY}`,
+          `Active: ${count(state?.active)} / ${capacity}`,
           `Pending eviction: ${count(state?.pendingEviction)}`,
           "Counts reflect the last compact/reload settlement."].join("\n");
         if (ctx.hasUI) ctx.ui.notify(message, "info");
@@ -51,7 +53,7 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
   const settle = (ctx: ExtensionContext, roots: string[]) => {
     try {
       const rootPaths = new Set(roots);
-      const state = settleAccesses(ctx.sessionManager.getBranch(), (path) => resolveToolPath(path, ctx.cwd), (path) => !rootPaths.has(path) && isManagedSkill(roots, path));
+      const state = settleAccesses(ctx.sessionManager.getBranch(), (path) => resolveToolPath(path, ctx.cwd), (path) => !rootPaths.has(path) && isManagedSkill(roots, path), capacity);
       pi.appendEntry(ACCESS_STATE, state);
     } catch (error) {
       const message = `[dynamic-skill] Access settlement failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -87,6 +89,9 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
   });
   pi.on("resources_discover", async (_event, ctx) => {
     projection = undefined;
+    const config = loadConfig(join(getAgentDir(), "dynamic-skill.json"));
+    capacity = config.capacity;
+    warn(ctx, config.diagnostics);
     try {
       const roots = discover();
       let skillPaths: string[] | undefined;

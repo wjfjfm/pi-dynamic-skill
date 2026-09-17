@@ -16,6 +16,16 @@ Reload or restart Pi after installation. The extension reuses the effective skil
 
 If no root is discovered, the extension creates `~/.pi/agent/skills/dynamic-skill/SKILL.md` (or the equivalent under `PI_CODING_AGENT_DIR`). The root is copied from `templates/dynamic-skill/SKILL.md`, which contains usage instructions, tree-maintenance guidance, the LRU policy, and an authoring example. You may edit it; existing roots are preserved and are not overwritten or automatically migrated. The default lives outside the extension installation, so updating the package does not remove authored skills.
 
+## Configuration
+
+Optional user configuration lives at `~/.pi/agent/dynamic-skill.json` (under `PI_CODING_AGENT_DIR` when set):
+
+```json
+{ "capacity": 20 }
+```
+
+`capacity` must be a positive safe integer. Configuration is read at startup and `/reload`; compaction uses the already loaded value. Missing configuration uses 20. Invalid configuration reports a warning and falls back to 20. Reducing capacity moves overflow into pending eviction at settlement. Root skills do not count toward capacity. No configuration file is created automatically.
+
 ## Tree structure
 
 ```text
@@ -77,7 +87,7 @@ Run `/dynamic-skill` to view recognized root directories and the current session
 
 Successful `read`, `write`, and `edit` operations on valid managed `SKILL.md` files are settled after successful compaction and on `/reload`. Settlement reads the current session branch, deduplicates by normalized path, and processes skills in order of their last successful access. Each skill receives at most one LRU update per settlement interval. A versioned custom session entry stores the active/pending lists and marks the settlement boundary; these entries do not enter model context. Failed operations and other branches do not count. No read hook is installed.
 
-The binary-progressive LRU ordering algorithm is implemented in `src/lru.ts`: a new skill enters at index `floor(N / 2)`; accessing an existing skill at index `i` promotes it to `floor(i / 2)`. Indexes start at zero, the head is most protected, and crossed entries shift back one position. Skills are identified by normalized absolute file paths. `accessSkillState` maintains separate active and pending-eviction collections with an explicit active capacity. A pending skill is readmitted at `floor(active.length / 2)`; active overflow moves to pending. With 20 active skills, the active tail promotes to index 9, while a pending or new skill enters at index 10. The active capacity is currently 20. The projected lists remain stable between settlements and refresh after compact/reload. Pending skills receive a notice asking the agent to read them again. At the next successful compact/reload, previously announced candidates without a new successful read/write/edit are removed from the list; new overflow receives a fresh notice interval. A custom session entry records which candidates entered model context, so repeated reloads before a notice is projected do not evict unseen candidates. Eviction never deletes files. Files that are missing or invalid at settlement are excluded.
+The binary-progressive LRU ordering algorithm is implemented in `src/lru.ts`: a new skill enters at index `floor(N / 2)`; accessing an existing skill at index `i` promotes it to `floor(i / 2)`. Indexes start at zero, the head is most protected, and crossed entries shift back one position. Skills are identified by normalized absolute file paths. `accessSkillState` maintains separate active and pending-eviction collections with an explicit active capacity. A pending skill is readmitted at `floor(active.length / 2)`; active overflow moves to pending. With 20 active skills, the active tail promotes to index 9, while a pending or new skill enters at index 10. The default active capacity is 20. The projected lists remain stable between settlements and refresh after compact/reload. Pending skills receive a notice asking the agent to read them again. At the next successful compact/reload, previously announced candidates without a new successful read/write/edit are removed from the list; new overflow receives a fresh notice interval. A custom session entry records which candidates entered model context, so repeated reloads before a notice is projected do not evict unseen candidates. Eviction never deletes files. Files that are missing or invalid at settlement are excluded.
 
 Already-read child content remains an ordinary tool result in history. Refreshing the root or changing a file does not rewrite previous tool results. This extension does not compact conversation history.
 
