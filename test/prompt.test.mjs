@@ -52,3 +52,37 @@ test('native skill lists, stable context projection, reload refresh and notice-b
   assert.doesNotMatch(refreshed[0].content, /Pending instructions/);
   assert.match(readFileSync(child('pending'), 'utf8'), /Pending instructions/, 'eviction never deletes skill files');
 });
+
+test('discovered roots have a fixed native section and never occupy active or pending slots', async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), 'dynamic-roots-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const roots = ['one', 'two'].map((name) => join(cwd, name, 'dynamic-skill', 'SKILL.md'));
+  for (const root of roots) {
+    mkdirSync(dirname(root), { recursive: true });
+    writeFileSync(root, '---\nname: dynamic-skill\ndescription: Root entry\n---\nROOT BODY');
+  }
+  const state = { version: 1, active: [roots[0]], pendingEviction: [roots[1]] };
+  const formatted = formatDynamicSkills(state, [...roots, roots[0]]);
+  const [rootSection, rest] = formatted.content.split('### Active skills');
+  assert.match(rootSection, /### Root Skills/);
+  for (const root of roots) assert.ok(rootSection.includes(`<location>${root}</location>`));
+  assert.equal((rootSection.match(/<name>dynamic-skill<\/name>/g) ?? []).length, 2);
+  assert.doesNotMatch(rest, /<name>dynamic-skill<\/name>/);
+  assert.doesNotMatch(formatted.content, /ROOT BODY/);
+  assert.deepEqual(formatted.pendingPaths, []);
+  const manager = SessionManager.inMemory(cwd);
+  manager.appendCustomEntry(ACCESS_STATE, state);
+  for (const [i, name] of ['read', 'write', 'edit'].entries()) {
+    manager.appendMessage({ role: 'assistant', content: [{ type: 'toolCall', id: String(i), name, arguments: { path: roots[0] } }], timestamp: 0 });
+    manager.appendMessage({ role: 'toolResult', toolCallId: String(i), toolName: name, isError: false, content: [], timestamp: 0 });
+  }
+  const hooks = new Map();
+  extension({ on: (name, handler) => hooks.set(name, handler),
+    getCommands: () => roots.map((path) => ({ source: 'skill', name: 'skill:dynamic-skill', sourceInfo: { path } })),
+    appendEntry: (type, data) => manager.appendCustomEntry(type, data) });
+  const ctx = { cwd, sessionManager: manager, hasUI: true, ui: { notify: (text) => assert.fail(text) } };
+  hooks.get('session_compact')({}, ctx);
+  assert.deepEqual(manager.getLeafEntry().data, { version: 1, active: [], pendingEviction: [] });
+  const projected = hooks.get('context')({ messages: [] }, ctx).messages[0].content;
+  for (const root of roots) assert.ok(projected.includes(`<location>${root}</location>`));
+});

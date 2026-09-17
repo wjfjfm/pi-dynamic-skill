@@ -31,7 +31,8 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
   };
   const settle = (ctx: ExtensionContext, roots: string[]) => {
     try {
-      const state = settleAccesses(ctx.sessionManager.getBranch(), (path) => resolveToolPath(path, ctx.cwd), (path) => isManagedSkill(roots, path));
+      const rootPaths = new Set(roots);
+      const state = settleAccesses(ctx.sessionManager.getBranch(), (path) => resolveToolPath(path, ctx.cwd), (path) => !rootPaths.has(path) && isManagedSkill(roots, path));
       pi.appendEntry(ACCESS_STATE, state);
     } catch (error) {
       const message = `[dynamic-skill] Access settlement failed: ${error instanceof Error ? error.message : String(error)}`;

@@ -27,16 +27,22 @@ The skill list uses a binary-progressive LRU queue. Successful read,
 write, and edit accesses are deduplicated per settlement interval.
 At compaction or reload, accessed active skills move halfway toward the
 front; new or re-accessed pending skills enter halfway into the active
-queue. Overflow moves to the pending-eviction list.`;
+queue. Overflow moves to the pending-eviction list.
+Root skills are listed separately and do not occupy LRU capacity or expire.`;
 
 export function formatDynamicSkills(state: SkillLruState, roots: string[]): { content: string; pendingPaths: string[] } {
   const load = (paths: readonly string[]): Skill[] => paths.flatMap((path) => {
     if (!isManagedSkill(roots, path)) return [];
     return loadSkillsFromDir({ dir: dirname(path), source: "dynamic-skill" }).skills.filter((skill) => skill.filePath === path);
   });
-  const active = load(state.active);
-  const pending = load(state.pendingEviction).filter((skill) => !skill.disableModelInvocation);
+  const rootPaths = new Set(roots);
+  const rootSkills = load([...rootPaths]);
+  const active = load(state.active.filter((path) => !rootPaths.has(path)));
+  const pending = load(state.pendingEviction.filter((path) => !rootPaths.has(path))).filter((skill) => !skill.disableModelInvocation);
   return { pendingPaths: pending.map((skill) => skill.filePath), content: `${INSTRUCTIONS}
+
+### Root Skills
+${formatSkillsForPrompt(rootSkills) || "\nNone."}
 
 ### Active skills
 ${formatSkillsForPrompt(active) || "\nNone."}
