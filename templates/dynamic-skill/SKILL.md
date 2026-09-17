@@ -33,12 +33,13 @@ Root skills are listed separately and do not occupy LRU capacity or expire.
 
 ```markdown
 ---
-name: testing
-description: Use when writing, running, or debugging project tests.
+name: Keep the name as short as possible to minimize directory length.
+description: Capture this skill's core distinguishing features so it can be precisely recalled when needed.
 ---
 
-Run tests with `npm test`.
-
-When a test fails, isolate the failing case, identify the cause,
-and verify the fix before running the full suite.
+Include all information needed to solve similar problems again:
+- The current state.
+- Approaches tried that did not work.
+- Approaches confirmed to work.
+- Recommendations for when this skill is recalled.
 ```
