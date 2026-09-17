@@ -30,7 +30,6 @@ export async function createSkill(directory: string, input: SkillInput): Promise
   if (!input.description.trim() || input.description.length > 1024) {
     throw new Error("Skill description must contain 1–1024 characters and cannot be blank.");
   }
-  if (!input.content.trim()) throw new Error("Skill content cannot be blank.");
 
   const root = resolve(directory);
   const skillDirectory = join(root, input.name);

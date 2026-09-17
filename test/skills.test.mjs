@@ -22,6 +22,8 @@ test("creates native Pi skills and reloads external replacements", async (t) => 
   assert.equal(await readFile(ref.filePath, "utf8"), original);
   await writeFile(ref.filePath, '---\nname: review-typescript\ndescription: Updated description\n---\n\nUpdated content');
   assert.equal(reloadSkills(root).skills[0].description, "Updated description");
+  await createSkill(root, { name: "empty", description: "Empty custom body", content: "" });
+  assert.ok(reloadSkills(root).skills.some((skill) => skill.name === "empty"));
   for (const name of ["../escape", "a/b", "Bad-Name", "a--b"]) {
     await assert.rejects(createSkill(root, { ...input, name }), /Skill name/);
   }
