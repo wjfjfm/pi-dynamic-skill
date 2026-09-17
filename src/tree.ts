@@ -57,62 +57,69 @@ function withChildren(text: string, children: SkillNode[]): string {
 function synchronizeNodes(targets: { filePath: string; name: string }[], recursive: boolean): TreeResult {
   const diagnostics: string[] = [];
   const visit = (filePath: string, expectedName: string): SkillNode | undefined => {
-    try {
-      if (basename(dirname(filePath)) !== expectedName) throw new Error(`Skill directory must be named ${expectedName}`);
-      if (!lstatSync(filePath).isFile() || lstatSync(filePath).isSymbolicLink()) throw new Error("SKILL.md must be a regular file");
-      const original = readFileSync(filePath, "utf8");
-      const parsed = validateSkill(original, expectedName);
-      const children: SkillNode[] = [];
-      const directory = join(dirname(filePath), "skills");
-      if (existsSync(directory)) {
-        if (!lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink()) throw new Error("skills must be a real directory");
-        for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, "en"))) {
-          if (entry.name.startsWith(".")) continue;
-          const childPath = join(directory, entry.name, "SKILL.md");
-          if (!entry.isDirectory() || !slug.test(entry.name) || entry.name.length > 64) {
-            diagnostics.push(`${join(directory, entry.name)}: expected a skill directory with a lowercase name`);
-            continue;
-          }
-          if (!existsSync(childPath)) {
-            diagnostics.push(`${childPath}: missing; subtree not loaded until its parent skill exists`);
-            continue;
-          }
-          if (recursive) {
-            const child = visit(childPath, entry.name);
-            if (child) children.push(child);
-          } else {
-            try {
-              if (!lstatSync(childPath).isFile() || lstatSync(childPath).isSymbolicLink()) throw new Error("SKILL.md must be a regular file");
-              const child = validateSkill(readFileSync(childPath, "utf8"), entry.name);
-              children.push({ ...child, filePath: childPath, children: [] });
-            } catch (error) {
-              diagnostics.push(`${childPath}: ${error instanceof Error ? error.message : String(error)}`);
+    // Retry the entire read/scan/patch operation so both parent text and child
+    // metadata are refreshed after a conflict. This is optimistic, not a lock.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        if (basename(dirname(filePath)) !== expectedName) throw new Error(`Skill directory must be named ${expectedName}`);
+        if (!lstatSync(filePath).isFile() || lstatSync(filePath).isSymbolicLink()) throw new Error("SKILL.md must be a regular file");
+        const original = readFileSync(filePath, "utf8");
+        const parsed = validateSkill(original, expectedName);
+        const children: SkillNode[] = [];
+        const directory = join(dirname(filePath), "skills");
+        if (existsSync(directory)) {
+          if (!lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink()) throw new Error("skills must be a real directory");
+          for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, "en"))) {
+            if (entry.name.startsWith(".")) continue;
+            const childPath = join(directory, entry.name, "SKILL.md");
+            if (!entry.isDirectory() || !slug.test(entry.name) || entry.name.length > 64) {
+              diagnostics.push(`${join(directory, entry.name)}: expected a skill directory with a lowercase name`);
+              continue;
+            }
+            if (!existsSync(childPath)) {
+              diagnostics.push(`${childPath}: missing; subtree not loaded until its parent skill exists`);
+              continue;
+            }
+            if (recursive) {
+              const child = visit(childPath, entry.name);
+              if (child) children.push(child);
+            } else {
+              try {
+                if (!lstatSync(childPath).isFile() || lstatSync(childPath).isSymbolicLink()) throw new Error("SKILL.md must be a regular file");
+                const child = validateSkill(readFileSync(childPath, "utf8"), entry.name);
+                children.push({ ...child, filePath: childPath, children: [] });
+              } catch (error) {
+                diagnostics.push(`${childPath}: ${error instanceof Error ? error.message : String(error)}`);
+              }
             }
           }
         }
-      }
-      // Direct child skill directories outside skills/ are not valid tree nodes.
-      for (const entry of readdirSync(dirname(filePath), { withFileTypes: true })) {
-        if (entry.name !== "skills" && entry.isDirectory() && existsSync(join(dirname(filePath), entry.name, "SKILL.md"))) {
-          diagnostics.push(`${join(dirname(filePath), entry.name)}: child skills must be inside skills/`);
+        // Direct child skill directories outside skills/ are not valid tree nodes.
+        for (const entry of readdirSync(dirname(filePath), { withFileTypes: true })) {
+          if (entry.name !== "skills" && entry.isDirectory() && existsSync(join(dirname(filePath), entry.name, "SKILL.md"))) {
+            diagnostics.push(`${join(dirname(filePath), entry.name)}: child skills must be inside skills/`);
+          }
         }
-      }
-      const updated = withChildren(original, children);
-      if (updated !== original) {
-        const temporary = join(dirname(filePath), `.dynamic-skill-${randomUUID()}.tmp`);
-        try {
-          writeFileSync(temporary, updated, { flag: "wx", mode: lstatSync(filePath).mode & 0o777 });
-          if (readFileSync(filePath, "utf8") !== original) throw new Error("File changed during synchronization; retry on next reload");
-          renameSync(temporary, filePath);
-        } finally {
-          if (existsSync(temporary)) unlinkSync(temporary);
+        if (readFileSync(filePath, "utf8") !== original) continue;
+        const updated = withChildren(original, children);
+        if (updated !== original) {
+          const temporary = join(dirname(filePath), `.dynamic-skill-${randomUUID()}.tmp`);
+          try {
+            writeFileSync(temporary, updated, { flag: "wx", mode: lstatSync(filePath).mode & 0o777 });
+            if (readFileSync(filePath, "utf8") !== original) continue;
+            renameSync(temporary, filePath);
+          } finally {
+            if (existsSync(temporary)) unlinkSync(temporary);
+          }
         }
+        return { ...parsed, body: parseFrontmatter(updated).body, filePath, children };
+      } catch (error) {
+        diagnostics.push(`${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+        return undefined;
       }
-      return { ...parsed, body: parseFrontmatter(updated).body, filePath, children };
-    } catch (error) {
-      diagnostics.push(`${filePath}: ${error instanceof Error ? error.message : String(error)}`);
-      return undefined;
     }
+    diagnostics.push(`${filePath}: File kept changing during synchronization; generated navigation was not applied. Retry after edits settle.`);
+    return undefined;
   };
   const roots = targets.flatMap(({ filePath, name }) => { const node = visit(filePath, name); return node ? [node] : []; });
   return { roots, diagnostics };
