@@ -5,7 +5,7 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
 import { loadConfig } from '../dist/config.js';
-import { ACCESS_STATE } from '../dist/access.js';
+import { ACCESS_STATE, latestAccessState } from '../dist/access.js';
 import extension from '../dist/index.js';
 
 test('capacity config defaults safely and rejects malformed values', (t) => {
@@ -55,15 +55,15 @@ test('startup and reload load capacity; compact uses the loaded value; shrinking
   await hooks.get('resources_discover')({ reason: 'startup' }, ctx);
   await command.handler('', ctx);
   assert.match(notices.at(-1).text, /Active: 3 \/ 3/);
-  assert.match(hooks.get("context")({ messages: [] }, ctx).messages[0].content, /### Active skills \(3\/3\)/);
+  assert.match(hooks.get("context")({ messages: [{ role: 'user', content: 'Task', timestamp: 1 }] }, ctx).messages[0].content, /### Active skills \(3\/3\)/);
   writeFileSync(config, '{"capacity":1}');
   hooks.get('session_compact')({}, ctx);
-  assert.equal(manager.getLeafEntry().data.active.length, 3);
+  assert.equal(latestAccessState(manager.getBranch()).state.active.length, 3);
   await hooks.get('resources_discover')({ reason: 'reload' }, ctx);
-  assert.deepEqual(manager.getLeafEntry().data, { version: 1, active: paths.slice(0, 1), pendingEviction: paths.slice(1) });
+  assert.deepEqual(latestAccessState(manager.getBranch()).state, { version: 1, active: paths.slice(0, 1), pendingEviction: paths.slice(1) });
   await command.handler('', ctx);
   assert.match(notices.at(-1).text, /Active: 1 \/ 1/);
-  assert.match(hooks.get("context")({ messages: [] }, ctx).messages[0].content, /### Active skills \(1\/1\)/);
+  assert.match(hooks.get("context")({ messages: [{ role: 'user', content: 'Task', timestamp: 1 }] }, ctx).messages[0].content, /### Active skills \(1\/1\)/);
   writeFileSync(config, 'broken');
   await hooks.get('resources_discover')({ reason: 'reload' }, ctx);
   assert.ok(notices.some((n) => n.type === 'warning' && n.text.includes('Using capacity 20')));

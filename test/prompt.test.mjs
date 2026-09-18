@@ -4,11 +4,11 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { formatSkillsForPrompt, loadSkillsFromDir, SessionManager, convertToLlm } from '@earendil-works/pi-coding-agent';
-import { ACCESS_STATE, ACCESS_NOTICE } from '../dist/access.js';
+import { ACCESS_STATE, ACCESS_NOTICE, latestAccessState } from '../dist/access.js';
 import { DYNAMIC_CONTEXT, formatDynamicSkills } from '../dist/prompt.js';
 import extension from '../dist/index.js';
 
-test('native skill lists, stable context projection, reload refresh and notice-based eviction', async (t) => {
+test('native skill lists, immutable projection across reload and notice-based eviction', async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), 'dynamic-prompt-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   const root = join(cwd, 'dynamic-skill', 'SKILL.md');
@@ -45,6 +45,7 @@ test('native skill lists, stable context projection, reload refresh and notice-b
     appendEntry: (type, data) => manager.appendCustomEntry(type, data) });
   const ctx = { cwd, sessionManager: manager, hasUI: true, ui: { notify: (text) => assert.fail(text) } };
   const original = [{ role: 'user', content: 'Task', timestamp: 1 }];
+  manager.appendMessage(original[0]);
   const project = (messages = original) => hooks.get('context')({ messages }, ctx).messages;
   const projected = project();
   assert.equal(projected[0].customType, DYNAMIC_CONTEXT);
@@ -52,13 +53,15 @@ test('native skill lists, stable context projection, reload refresh and notice-b
   assert.deepEqual(project(projected), projected, 'never duplicate the projected block');
   assert.equal(manager.getBranch().filter((e) => e.customType === ACCESS_NOTICE).length, 1);
   assert.match(JSON.stringify(convertToLlm(projected)), /Dynamic skills/);
-  assert.equal(manager.buildSessionContext().messages.length, 0, 'projection is not persisted conversation history');
+  assert.equal(manager.buildSessionContext().messages.length, 1, 'projection metadata is not persisted as conversation history');
   write(child('active'), 'active', 'Updated description');
   assert.deepEqual(project(), projected, 'metadata remains stable until settlement/reload');
   await hooks.get('resources_discover')({ reason: 'reload' }, ctx);
   const refreshed = project();
-  assert.match(refreshed[0].content, /Updated description/);
-  assert.doesNotMatch(refreshed[0].content, /### Pending eviction|Pending instructions|Read a skill's SKILL.md to retain it/);
+  assert.deepEqual(refreshed, projected, 'reload must not rewrite descriptions already injected');
+  assert.doesNotMatch(refreshed[0].content, /Updated description/);
+  assert.equal(latestAccessState(manager.getBranch()).state.pendingEviction.includes(child('pending')), false,
+    'internal eviction does not erase or reprint the historical description');
   assert.match(refreshed[0].content, /<name>group<\/name>/, "first-level navigation remains available");
   assert.match(readFileSync(child('pending'), 'utf8'), /Pending instructions/, 'eviction never deletes skill files');
 });
@@ -97,8 +100,8 @@ test('direct children have a fixed native section without bodies or LRU slots', 
     appendEntry: (type, data) => manager.appendCustomEntry(type, data) });
   const ctx = { cwd, sessionManager: manager, hasUI: true, ui: { notify: (text) => assert.fail(text) } };
   hooks.get('session_compact')({}, ctx);
-  assert.deepEqual(manager.getLeafEntry().data, { version: 1, active: [], pendingEviction: [] });
-  const projected = hooks.get('context')({ messages: [] }, ctx).messages[0].content;
+  assert.deepEqual(latestAccessState(manager.getBranch()).state, { version: 1, active: [], pendingEviction: [] });
+  const projected = hooks.get('context')({ messages: [{ role: 'user', content: 'Task', timestamp: 1 }] }, ctx).messages[0].content;
   for (const child of children) assert.ok(projected.includes(`<location>${child}</location>`));
 });
 

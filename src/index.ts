@@ -3,9 +3,10 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { isManagedSkill, listTopLevelSkills, refreshWrittenSkill, synchronizeTrees } from "./tree.js";
-import { ACCESS_NOTICE, ACCESS_STATE, ACTIVE_CAPACITY, latestAccessState, noticeWasShown, settleAccesses } from "./access.js";
-import { DYNAMIC_CONTEXT, formatDynamicSkills } from "./prompt.js";
+import { listTopLevelSkills, refreshWrittenSkill, synchronizeTrees } from "./tree.js";
+import { ACTIVE_CAPACITY, latestAccessState } from "./access.js";
+import { contextOwner } from "./context.js";
+import { createSkillContextRuntime } from "./runtime.js";
 import { loadConfig } from "./config.js";
 
 function resolveToolPath(path: string, cwd: string): string {
@@ -15,7 +16,6 @@ function resolveToolPath(path: string, cwd: string): string {
 
 export default function dynamicSkill(pi: ExtensionAPI): void {
   let capacity = ACTIVE_CAPACITY;
-  let projection: { key: string; content: string; pendingPaths: string[] } | undefined;
   const discover = () => pi.getCommands().filter((command) => command.source === "skill" && command.name === "skill:dynamic-skill").map((command) => command.sourceInfo.path);
   const warn = (ctx: ExtensionContext, diagnostics: string[]) => {
     if (!diagnostics.length) return;
@@ -35,7 +35,7 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
           ...(roots.length ? roots.map((path) => dirname(path)) : ["None."]), "",
           `Active: ${count(state?.active)} / ${capacity}`,
           `Pending eviction: ${count(state?.pendingEviction)}`,
-          "Counts reflect the last compact/reload settlement."].join("\n");
+          "Counts reflect the last compact/reload/backtrack settlement; active may exceed capacity while descriptions remain visible."].join("\n");
         if (ctx.hasUI) ctx.ui.notify(message, "info");
         else process.stderr.write(message + "\n");
       } catch (error) {
@@ -44,52 +44,26 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
     },
   });
   const refresh = (ctx: ExtensionContext, roots: string[]) => {
-    projection = undefined;
     try {
       warn(ctx, synchronizeTrees(roots).diagnostics);
     } catch (error) {
       warn(ctx, [error instanceof Error ? error.message : String(error)]);
     }
   };
-  const settle = (ctx: ExtensionContext, roots: string[]) => {
-    try {
-      const rootPaths = new Set([...roots, ...listTopLevelSkills(roots)]);
-      const state = settleAccesses(ctx.sessionManager.getBranch(), (path) => resolveToolPath(path, ctx.cwd), (path) => !rootPaths.has(path) && isManagedSkill(roots, path), capacity);
-      pi.appendEntry(ACCESS_STATE, state);
-    } catch (error) {
-      const message = `[dynamic-skill] Access settlement failed: ${error instanceof Error ? error.message : String(error)}`;
-      if (ctx.hasUI) ctx.ui.notify(message, "warning");
-      else process.stderr.write(message + "\n");
-    }
-  };
-  pi.on("session_compact", (_event, ctx) => {
-    const roots = discover();
-    refresh(ctx, roots);
-    settle(ctx, roots);
-  });
+  const runtime = createSkillContextRuntime(pi, { roots: discover, capacity: () => capacity, resolvePath: resolveToolPath, refresh });
+  pi.on("session_compact", (_event, ctx) => runtime.settle(ctx, true));
   pi.on("context", (event, ctx) => {
+    // A context-transforming extension owns composition, not this extension's hook order.
+    if (contextOwner(pi)) return;
     try {
-      const branch = ctx.sessionManager.getBranch();
-      const snapshot = latestAccessState(branch);
-      const roots = discover();
-      const key = JSON.stringify([ctx.sessionManager.getSessionId(), snapshot?.id, roots, capacity]);
-      if (projection?.key !== key) {
-        projection = { key, ...formatDynamicSkills(snapshot?.state ?? { active: [], pendingEviction: [] }, roots, capacity) };
-      }
-      if (snapshot?.state.pendingEviction.length && !noticeWasShown(branch, snapshot.id)) {
-        pi.appendEntry(ACCESS_NOTICE, { settlementId: snapshot.id, paths: projection.pendingPaths });
-      }
-      return { messages: [{ role: "custom" as const, customType: DYNAMIC_CONTEXT,
-        content: projection.content, display: false, timestamp: 0 },
-      ...event.messages.filter((message) => message.role !== "custom" || message.customType !== DYNAMIC_CONTEXT)] };
+      const messages = runtime.project(ctx, event.messages);
+      runtime.shown(ctx, messages);
+      return { messages };
     } catch (error) {
-      const message = `[dynamic-skill] Context loading failed: ${error instanceof Error ? error.message : String(error)}`;
-      if (ctx.hasUI) ctx.ui.notify(message, "warning");
-      else process.stderr.write(message + "\n");
+      warn(ctx, [`Context loading failed: ${error instanceof Error ? error.message : String(error)}`]);
     }
   });
   pi.on("resources_discover", async (_event, ctx) => {
-    projection = undefined;
     const config = loadConfig(join(getAgentDir(), "dynamic-skill.json"));
     capacity = config.capacity;
     warn(ctx, config.diagnostics);
@@ -111,7 +85,7 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
         skillPaths = [root];
       }
       refresh(ctx, roots);
-      if (_event.reason === "reload") settle(ctx, roots);
+      if (_event.reason === "reload") runtime.settle(ctx, false);
       if (skillPaths) return { skillPaths };
     } catch (error) {
       // Resource maintenance must never prevent the session from starting.

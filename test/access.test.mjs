@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, renameSync, rmSync
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
-import { ACCESS_NOTICE, ACCESS_STATE, settleAccesses } from '../dist/access.js';
+import { ACCESS_NOTICE, ACCESS_STATE, latestAccessState, settleAccesses } from '../dist/access.js';
 import extension from '../dist/index.js';
 
 function record(manager, id, name, path, isError = false) {
@@ -88,14 +88,14 @@ test('extension settles on successful compact and reload, never on tool results'
   assert.equal(manager.getLeafId(), before);
   assert.equal(hooks.has('session_before_compact'), false);
   hooks.get('session_compact')({}, ctx);
-  assert.deepEqual(manager.getLeafEntry().data.active, [child]);
-  const state = manager.getLeafEntry().data;
+  assert.deepEqual(latestAccessState(manager.getBranch()).state.active, [child]);
+  const state = latestAccessState(manager.getBranch()).state;
   install(); // A fresh extension instance restores state from the session.
   await hooks.get('resources_discover')({ reason: 'reload' }, ctx);
-  assert.deepEqual(manager.getLeafEntry().data, state);
+  assert.deepEqual(latestAccessState(manager.getBranch()).state, state);
   record(manager, '2', 'edit', child);
   await hooks.get('resources_discover')({ reason: 'reload' }, ctx);
-  assert.deepEqual(manager.getLeafEntry().data.active, [resolve(child)]);
+  assert.deepEqual(latestAccessState(manager.getBranch()).state.active, [resolve(child)]);
   assert.equal(manager.buildSessionContext().messages.some((m) => m.customType === ACCESS_STATE), false);
 });
 
@@ -138,9 +138,9 @@ test('successful compact refreshes moved/deleted skill indexes before settlement
   record(manager, 'moved-read', 'read', child('moved'));
   assertRefreshed = true;
   assert.doesNotThrow(() => hooks.get('session_compact')({}, ctx));
-  assert.deepEqual(manager.getLeafEntry().data.active, [child('moved')]);
+  assert.deepEqual(latestAccessState(manager.getBranch()).state.active, [child('moved')]);
   assert.ok(warnings.some((text) => text.includes('invalid/SKILL.md')));
-  const content = hooks.get('context')({ messages: [] }, ctx).messages[0].content;
+  const content = hooks.get('context')({ messages: [{ role: 'user', content: 'Task', timestamp: 1 }] }, ctx).messages[0].content;
   assert.match(content, /<name>moved<\/name>/);
   assert.doesNotMatch(content, /<name>(old|removed)<\/name>/);
   assert.equal(hooks.has('session_compact_failed'), false);

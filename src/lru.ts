@@ -23,12 +23,12 @@ export interface SkillLruState {
  * its pending notice. Overflow moves to pending, without deleting any files.
  * Pending entries retain their order; newly displaced entries are appended.
  */
-export function accessSkillState(state: SkillLruState, filePath: string, capacity: number): SkillLruState {
+export function accessSkillState(state: SkillLruState, filePath: string, capacity: number, protectedPaths: ReadonlySet<string> = new Set()): SkillLruState {
   if (!Number.isSafeInteger(capacity) || capacity < 1) {
     throw new RangeError("Active skill capacity must be a positive safe integer.");
   }
   const active = accessSkill(state.active, filePath);
-  const overflow = active.splice(capacity);
+  const overflow = active.filter((path, index) => index >= capacity && !protectedPaths.has(path));
   const pendingEviction = state.pendingEviction.filter((path) => path !== filePath);
-  return { active, pendingEviction: [...pendingEviction, ...overflow] };
+  return { active: active.filter((path) => !overflow.includes(path)), pendingEviction: [...pendingEviction, ...overflow] };
 }

@@ -22,9 +22,14 @@ indexes are maintained automatically.
 
 The skill list uses a binary-progressive LRU queue. Successful read,
 write, and edit accesses are deduplicated per settlement interval.
-At compaction or reload, accessed active skills move halfway toward the
-front; new or re-accessed pending skills enter halfway into the active
-queue. Overflow moves to the pending-eviction list.
+At compaction, reload, or an integrated backtrack, accessed active skills
+move halfway toward the front; new or re-accessed pending skills enter
+halfway into the active queue. Overflow moves to pending only when its
+description is no longer retained in context. Otherwise it remains active,
+so capacity can be temporarily exceeded. Context updates append only
+missing descriptions; existing descriptions and read results stay unchanged.
+Before backtracking, save useful findings here and confirm the writes
+succeeded. Saving knowledge and backtracking are separate operations.
 Direct children of dynamic-skill roots are listed under Root Skills and do not
 occupy LRU capacity or expire. Deeper skills are managed by the LRU queue.
 

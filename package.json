@@ -8,6 +8,10 @@
     ".": {
       "types": "./dist/skills.d.ts",
       "import": "./dist/skills.js"
+    },
+    "./context": {
+      "types": "./dist/context.d.ts",
+      "import": "./dist/context.js"
     }
   },
   "files": ["dist", "src", "templates", "tsconfig.json", "tsconfig.build.json", "README.md", "README.zh-CN.md"],

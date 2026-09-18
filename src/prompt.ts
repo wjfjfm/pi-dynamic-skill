@@ -4,19 +4,21 @@ import { ACTIVE_CAPACITY } from "./access.js";
 import type { SkillLruState } from "./lru.js";
 import { isManagedSkill, listTopLevelSkills } from "./tree.js";
 
-export const DYNAMIC_CONTEXT = "dynamic-skill:context";
-export function formatDynamicSkills(state: SkillLruState, roots: string[], capacity = ACTIVE_CAPACITY): { content: string; pendingPaths: string[] } {
+export { DYNAMIC_CONTEXT } from "./context.js";
+export function formatDynamicSkills(state: SkillLruState, roots: string[], capacity = ACTIVE_CAPACITY,
+  visible: ReadonlySet<string> = new Set(), full = true,
+): { content: string; paths: string[]; pendingPaths: string[] } {
   const load = (paths: readonly string[]): Skill[] => paths.flatMap((path) => {
     if (!isManagedSkill(roots, path)) return [];
     return loadSkillsFromDir({ dir: dirname(path), source: "dynamic-skill" }).skills.filter((skill) => skill.filePath === path);
   });
   const topLevel = listTopLevelSkills(roots);
   const rootPaths = new Set([...roots, ...topLevel]);
-  const rootSkills = load(topLevel).filter((skill) => !skill.disableModelInvocation);
+  const rootSkills = load(topLevel).filter((skill) => !skill.disableModelInvocation && !visible.has(skill.filePath));
   const activePaths = state.active.filter((path) => !rootPaths.has(path));
-  const active = load(activePaths);
-  const pending = load(state.pendingEviction.filter((path) => !rootPaths.has(path))).filter((skill) => !skill.disableModelInvocation);
-  const sections = ["[dynamic-skill extention: ON]", "## Dynamic skills"];
+  const active = load(activePaths).filter((skill) => !skill.disableModelInvocation && !visible.has(skill.filePath));
+  const pending = load(state.pendingEviction.filter((path) => !rootPaths.has(path))).filter((skill) => !skill.disableModelInvocation && !visible.has(skill.filePath));
+  const sections = full ? ["[dynamic-skill extention: ON]", "## Dynamic skills"] : ["## Dynamic skill updates"];
   let guidance: string | undefined;
   const appendSkills = (title: string, skills: Skill[], notice?: string, keepEmpty = false) => {
     const formatted = formatSkillsForPrompt(skills);
@@ -33,9 +35,10 @@ export function formatDynamicSkills(state: SkillLruState, roots: string[], capac
     sections.push(formatted.slice(start));
   };
   appendSkills("Root Skills", rootSkills);
-  appendSkills(`Active skills (${activePaths.length}/${capacity})`, active, undefined, true);
-  appendSkills("Pending eviction", pending,
-    "These skills will be evicted at the next compaction or reload unless\naccessed again. Read a skill's SKILL.md to retain it.");
-  if (guidance) sections.splice(2, 0, guidance);
-  return { pendingPaths: pending.map((skill) => skill.filePath), content: sections.join("\n\n") };
+  appendSkills(full ? `Active skills (${activePaths.length}/${capacity})` : "New active skills", active, undefined, full);
+  appendSkills(full ? "Pending eviction" : "New pending eviction", pending,
+    "These skills will be evicted at the next compaction, reload, or backtrack unless\naccessed again. Read a skill's SKILL.md to retain it.");
+  if (guidance && full) sections.splice(2, 0, guidance);
+  const paths = [...rootSkills, ...active, ...pending].map((skill) => skill.filePath);
+  return { paths, pendingPaths: pending.map((skill) => skill.filePath), content: !full && !paths.length ? "" : sections.join("\n\n") };
 }
