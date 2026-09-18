@@ -3,8 +3,9 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { listTopLevelSkills, refreshWrittenSkill, synchronizeTrees } from "./tree.js";
-import { ACTIVE_CAPACITY, latestAccessState } from "./access.js";
+import { readSkillTrees, refreshWrittenSkill, synchronizeTrees } from "./tree.js";
+import { ACTIVE_CAPACITY, MANUAL_SELECTION, selectionState } from "./access.js";
+import { SkillSelector, skillRows } from "./selector.js";
 import { contextOwner } from "./context.js";
 import { createSkillContextRuntime } from "./runtime.js";
 import { loadConfig } from "./config.js";
@@ -24,18 +25,29 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
     else process.stderr.write(message + "\n");
   };
   pi.registerCommand("dynamic-skill", {
-    description: "Show dynamic skill roots and session status",
+    description: "Select dynamic skills: LRU queue / All skill tree",
     handler: async (_args, ctx) => {
       try {
         const roots = [...new Set(discover())];
-        const state = latestAccessState(ctx.sessionManager.getBranch())?.state;
-        const pinned = new Set([...roots, ...listTopLevelSkills(roots)]);
-        const count = (paths: readonly string[] = []) => paths.filter((path) => !pinned.has(path)).length;
-        const message = ["Dynamic skills", "", "Root directories",
+        const state = selectionState(ctx.sessionManager.getBranch());
+        const active = state.active.filter((path) => !roots.includes(path));
+        if (ctx.mode === "tui") {
+          const tree = readSkillTrees(roots);
+          warn(ctx, tree.diagnostics);
+          const selected = await ctx.ui.custom<string[] | undefined>((tui, theme, keys, done) =>
+            new SkillSelector(skillRows(tree.roots), active, theme, keys, done, () => tui.requestRender(), () => tui.terminal.rows));
+          if (selected) {
+            const add = selected.filter((path) => !active.includes(path));
+            const remove = active.filter((path) => !selected.includes(path));
+            if (add.length || remove.length) pi.appendEntry(MANUAL_SELECTION, { add, remove });
+          }
+          return;
+        }
+        const message = ["Dynamic skills (read-only; interactive selection requires TUI)", "", "Root directories",
           ...(roots.length ? roots.map((path) => dirname(path)) : ["None."]), "",
-          `Active: ${count(state?.active)} / ${capacity}`,
-          `Pending eviction: ${count(state?.pendingEviction)}`,
-          "Counts reflect the last compact/reload/backtrack settlement; active may exceed capacity while descriptions remain visible."].join("\n");
+          `Active: ${active.length} / ${capacity} (LRU)`, ...active.map((path, i) => `${i + 1}. ${path}`),
+          `Pending eviction: ${state.pendingEviction.length}`, ...state.pendingEviction,
+          "Queue reflects last settlement + manual edits."].join("\n");
         if (ctx.hasUI) ctx.ui.notify(message, "info");
         else process.stderr.write(message + "\n");
       } catch (error) {

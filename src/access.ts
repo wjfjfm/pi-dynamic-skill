@@ -1,5 +1,35 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
-import { accessSkillState, type SkillLruState } from "./lru.js";
+import { accessSkill, accessSkillState, type SkillLruState } from "./lru.js";
+
+export const MANUAL_SELECTION = "dynamic-skill:manual-selection";
+export interface ManualSelection { add: string[]; remove: string[] }
+
+/** Unsettled manual intent; deliberately separate from the access scan boundary. */
+export function manualSelection(branch: SessionEntry[]): Map<string, boolean> {
+  const result = new Map<string, boolean>();
+  for (const entry of branch) {
+    if (entry.type !== "custom") continue;
+    if (entry.customType === ACCESS_STATE) result.clear();
+    if (entry.customType !== MANUAL_SELECTION) continue;
+    const data = entry.data as ManualSelection;
+    for (const [paths, selected] of [[data.add, true], [data.remove, false]] as const) {
+      for (const path of paths) { result.delete(path); result.set(path, selected); }
+    }
+  }
+  return result;
+}
+
+export function selectionState(branch: SessionEntry[]): AccessState {
+  const snapshot = latestAccessState(branch)?.state ?? { version: 1 as const, active: [], pendingEviction: [] };
+  let active = [...snapshot.active];
+  let pendingEviction = [...snapshot.pendingEviction];
+  for (const [path, selected] of manualSelection(branch)) {
+    active = selected ? accessSkill(active, path) : active.filter((item) => item !== path);
+    pendingEviction = pendingEviction.filter((item) => item !== path);
+    // Manual removals are intentionally absent from the public pending list.
+  }
+  return { version: 1, active, pendingEviction };
+}
 
 export const ACCESS_STATE = "dynamic-skill:access-state";
 export const ACCESS_NOTICE = "dynamic-skill:eviction-notice";
@@ -57,9 +87,15 @@ export function settleAccesses(
     }
   }
   const calls = new Map<string, { name: string; path: string }>();
-  const accesses = new Map<string, true>();
+  const accesses = new Map<string, boolean>();
   for (let i = 0; i < branch.length; i++) {
     const entry = branch[i]!;
+    if (i > boundary && entry.type === "custom" && entry.customType === MANUAL_SELECTION) {
+      const data = entry.data as ManualSelection;
+      for (const [paths, selected] of [[data.add, true], [data.remove, false]] as const) {
+        for (const path of paths) { accesses.delete(path); accesses.set(path, selected); }
+      }
+    }
     if (entry.type !== "message") continue;
     const message = entry.message;
     if (message.role === "assistant") {
@@ -80,8 +116,9 @@ export function settleAccesses(
     }
   }
   state = { active: state.active.filter(eligible), pendingEviction: state.pendingEviction.filter(eligible) };
-  for (const path of accesses.keys()) {
-    if (eligible(path)) state = accessSkillState(state, path, capacity, protectedPaths);
+  for (const [path, selected] of accesses) {
+    if (!selected) state = { active: state.active.filter((item) => item !== path), pendingEviction: state.pendingEviction.filter((item) => item !== path) };
+    else if (eligible(path)) state = accessSkillState(state, path, capacity, protectedPaths);
   }
   // Only previously announced, unaccessed candidates expire. New overflow gets
   // its own notice interval, even if an accessed candidate overflows again.

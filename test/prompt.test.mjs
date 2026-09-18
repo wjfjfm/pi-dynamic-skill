@@ -67,7 +67,7 @@ test('native skill lists, immutable projection across reload and notice-based ev
   assert.match(readFileSync(child('pending'), 'utf8'), /Pending instructions/, 'eviction never deletes skill files');
 });
 
-test('direct children are discovered through root indexes, not injected or assigned LRU slots', async (t) => {
+test('direct children use active and pending lists while only roots are excluded', async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), 'dynamic-roots-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   const roots = ['one', 'two'].map((name) => join(cwd, name, 'dynamic-skill', 'SKILL.md'));
@@ -82,12 +82,12 @@ test('direct children are discovered through root indexes, not injected or assig
   }
   const state = { version: 1, active: [roots[0], children[0]], pendingEviction: [roots[1], children[1]] };
   const formatted = formatDynamicSkills(state, [...roots, roots[0]]);
-  assert.doesNotMatch(formatted.content, /Root Skills|<available_skills>|<name>entry<\/name>/);
-  assert.deepEqual(formatted.paths, []);
-  assert.equal(formatDynamicSkills(state, roots, 20, new Set(), false).content, '');
-  assert.doesNotMatch(formatted.content, /### Pending eviction|None\./);
+  assert.doesNotMatch(formatted.content, /Root Skills/);
+  assert.deepEqual(formatted.paths, children);
+  assert.match(formatDynamicSkills(state, roots, 20, new Set(), false).content, /New active skills/);
+  assert.match(formatted.content, /### Pending eviction/);
   assert.doesNotMatch(formatted.content, /ROOT BODY|CHILD BODY|<name>dynamic-skill<\/name>/);
-  assert.deepEqual(formatted.pendingPaths, []);
+  assert.deepEqual(formatted.pendingPaths, [children[1]]);
   const manager = SessionManager.inMemory(cwd);
   manager.appendCustomEntry(ACCESS_STATE, state);
   for (const [i, name] of ['read', 'write', 'edit'].entries()) {
@@ -100,10 +100,10 @@ test('direct children are discovered through root indexes, not injected or assig
     appendEntry: (type, data) => manager.appendCustomEntry(type, data) });
   const ctx = { cwd, sessionManager: manager, hasUI: true, ui: { notify: (text) => assert.fail(text) } };
   hooks.get('session_compact')({}, ctx);
-  assert.deepEqual(latestAccessState(manager.getBranch()).state, { version: 1, active: [], pendingEviction: [] });
+  assert.deepEqual(latestAccessState(manager.getBranch()).state, { version: 1, active: [children[0]], pendingEviction: [children[1]] });
   const projected = hooks.get('context')({ messages: [{ role: 'user', content: 'Task', timestamp: 1 }] }, ctx).messages[0].content;
-  for (const child of children) assert.ok(!projected.includes(child));
-  assert.match(projected, /Active skills \(0\/20\)/);
+  for (const child of children) assert.ok(projected.includes(child));
+  assert.match(projected, /Active skills \(1\/20\)/);
   for (const root of roots) assert.match(readFileSync(root, 'utf8'), /skills\/entry\/SKILL.md/);
 });
 

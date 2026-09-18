@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { buildSessionContext, type ExtensionAPI, type ExtensionContext, type SessionEntry } from "@earendil-works/pi-coding-agent";
-import { ACCESS_NOTICE, ACCESS_STATE, latestAccessState, settleAccesses } from "./access.js";
+import { ACCESS_NOTICE, ACCESS_STATE, latestAccessState, manualSelection, settleAccesses } from "./access.js";
 import { formatDynamicSkills } from "./prompt.js";
-import { isManagedSkill, listTopLevelSkills } from "./tree.js";
+import { isManagedSkill } from "./tree.js";
 import { contextOwner, DYNAMIC_CONTEXT, messageKey, SERVICE_CHANNEL, skillDetails, visibleSkills,
   type ContextMessage, type PreparedSkills, type SkillContextService } from "./context.js";
 
@@ -59,7 +59,17 @@ export function createSkillContextRuntime(pi: ExtensionAPI, options: {
           before: !!user || !messages.length, message: block });
         save(value);
       }
-      return apply(messages, value);
+      const result = apply(messages, value);
+      const roots = options.roots();
+      const active = [...manualSelection(branch)].filter(([path, selected]) => selected && !roots.includes(path) && isManagedSkill(roots, path)).map(([path]) => path);
+      const additions = makeMessage({ active, pendingEviction: [] }, roots, visibleSkills(result), false, randomUUID());
+      if (additions.length) {
+        const anchor = messageKey(result[result.length - 1]!);
+        for (const message of additions) value.blocks.push({ anchor, before: false, message });
+        save(value);
+        return apply(result, value);
+      }
+      return result;
     },
     prepare(ctx, retained, transactionId, full) {
       const branch = ctx.sessionManager.getBranch();
@@ -69,7 +79,7 @@ export function createSkillContextRuntime(pi: ExtensionAPI, options: {
       const roots = options.roots();
       options.refresh(ctx, roots);
       const visible = full ? new Set<string>() : visibleSkills(retained);
-      const pinned = new Set([...roots, ...listTopLevelSkills(roots)]);
+      const pinned = new Set(roots);
       const state = settleAccesses(branch, (path) => options.resolvePath(path, ctx.cwd),
         (path) => !pinned.has(path) && isManagedSkill(roots, path), options.capacity(), visible);
       const messages = makeMessage(state, roots, visible, full, transactionId);

@@ -2,7 +2,7 @@ import { dirname } from "node:path";
 import { formatSkillsForPrompt, loadSkillsFromDir, type Skill } from "@earendil-works/pi-coding-agent";
 import { ACTIVE_CAPACITY } from "./access.js";
 import type { SkillLruState } from "./lru.js";
-import { isManagedSkill, listTopLevelSkills } from "./tree.js";
+import { isManagedSkill } from "./tree.js";
 
 export { DYNAMIC_CONTEXT } from "./context.js";
 export function formatDynamicSkills(state: SkillLruState, roots: string[], capacity = ACTIVE_CAPACITY,
@@ -12,8 +12,8 @@ export function formatDynamicSkills(state: SkillLruState, roots: string[], capac
     if (!isManagedSkill(roots, path)) return [];
     return loadSkillsFromDir({ dir: dirname(path), source: "dynamic-skill" }).skills.filter((skill) => skill.filePath === path);
   });
-  // Root indexes are read on demand; roots and direct children stay outside LRU lists.
-  const rootPaths = new Set([...roots, ...listTopLevelSkills(roots)]);
+  // Only roots remain in Pi's native catalog; all descendants use the LRU lists.
+  const rootPaths = new Set(roots);
   const activePaths = state.active.filter((path) => !rootPaths.has(path));
   const active = load(activePaths).filter((skill) => !skill.disableModelInvocation && !visible.has(skill.filePath));
   const pending = load(state.pendingEviction.filter((path) => !rootPaths.has(path))).filter((skill) => !skill.disableModelInvocation && !visible.has(skill.filePath));

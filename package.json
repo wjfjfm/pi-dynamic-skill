@@ -14,16 +14,27 @@
       "import": "./dist/context.js"
     }
   },
-  "files": ["dist", "src", "templates", "tsconfig.json", "tsconfig.build.json", "README.md", "README.zh-CN.md"],
+  "files": [
+    "dist",
+    "src",
+    "templates",
+    "tsconfig.json",
+    "tsconfig.build.json",
+    "README.md",
+    "README.zh-CN.md"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/wjfjfm/pi-dynamic-skill.git"
   },
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.85.1"
+    "@earendil-works/pi-coding-agent": "^0.85.1",
+    "@earendil-works/pi-tui": "^0.85.1"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

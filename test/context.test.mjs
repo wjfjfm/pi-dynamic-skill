@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { createEventBus, SessionManager } from '@earendil-works/pi-coding-agent';
 import { createSkillContextRuntime } from '../dist/runtime.js';
-import { ACCESS_NOTICE, ACCESS_STATE, latestAccessState, settleAccesses } from '../dist/access.js';
+import { ACCESS_NOTICE, ACCESS_STATE, MANUAL_SELECTION, selectionState, latestAccessState, settleAccesses } from '../dist/access.js';
 import { OWNER_CHANNEL, skillContextService, skillDetails, visibleSkills } from '../dist/context.js';
 
 function fixture(t) {
@@ -28,6 +28,43 @@ const read = (manager, path, id = 'read') => {
   manager.appendMessage({ role: 'assistant', content: [{ type: 'toolCall', id, name: 'read', arguments: { path } }], timestamp: 1 });
   manager.appendMessage({ role: 'toolResult', toolCallId: id, toolName: 'read', content: [], isError: false, timestamp: 2 });
 };
+
+test('manual additions project on next turn without settlement; removals stay silent until settlement', (t) => {
+  const { runtime, ctx, manager, paths } = fixture(t);
+  const user = { role: 'user', content: 'task', timestamp: 0 };
+  const initial = runtime.project(ctx, [user]);
+  read(manager, paths[0]);
+  manager.appendCustomEntry(MANUAL_SELECTION, { add: [paths[1]], remove: [] });
+  assert.equal(latestAccessState(manager.getBranch()), undefined);
+  const projected = runtime.project(ctx, initial);
+  assert.deepEqual(projected.slice(0, initial.length), initial);
+  assert.match(projected.at(-1).content, /New active skills/);
+  assert.deepEqual(skillDetails(projected.at(-1)).paths, [paths[1]]);
+  assert.deepEqual(runtime.project(ctx, projected), projected);
+  assert.deepEqual(runtime.project(ctx, [user]), projected, 'projection survives rebuilding from raw input');
+  manager.appendCustomEntry(MANUAL_SELECTION, { add: [], remove: [paths[1]] });
+  assert.deepEqual(selectionState(manager.getBranch()).active, []);
+  assert.deepEqual(selectionState(manager.getBranch()).pendingEviction, []);
+  assert.deepEqual(runtime.project(ctx, projected), projected, 'immutable visible descriptions are not rewritten');
+  const prepared = runtime.prepare(ctx, projected, 'manual-settle', false);
+  prepared.commit();
+  assert.deepEqual(latestAccessState(manager.getBranch()).state.active, [paths[0]], 'manual entry must not swallow preceding tool accesses');
+  assert.deepEqual(latestAccessState(manager.getBranch()).state.pendingEviction, []);
+  assert.ok(!prepared.messages.some((m) => skillDetails(m).paths.includes(paths[1])));
+});
+
+for (const recovery of ['read', 'manual', 'none']) test(`manual removal chronological recovery: ${recovery}`, (t) => {
+  const { runtime, ctx, manager, paths } = fixture(t);
+  manager.appendCustomEntry(ACCESS_STATE, { version: 1, active: [paths[0]], pendingEviction: [] });
+  read(manager, paths[0], 'before');
+  manager.appendCustomEntry(MANUAL_SELECTION, { add: [], remove: [paths[0]] });
+  if (recovery === 'read') read(manager, paths[0], 'after');
+  if (recovery === 'manual') manager.appendCustomEntry(MANUAL_SELECTION, { add: [paths[0]], remove: [] });
+  const prepared = runtime.prepare(ctx, [], 'manual-full', true);
+  prepared.commit();
+  assert.deepEqual(latestAccessState(manager.getBranch()).state.active, recovery === 'none' ? [] : [paths[0]]);
+  assert.deepEqual(latestAccessState(manager.getBranch()).state.pendingEviction, []);
+});
 
 test('fixed skill anchor is immediately before first user, not before the whole prefix or latest user', (t) => {
   const { runtime, ctx, pi } = fixture(t);
@@ -72,6 +109,24 @@ test('backtrack preparation protects visible overflow, appends only missing desc
   next.commit();
   assert.equal(latestAccessState(manager.getBranch()).state.active.length, 3);
 });
+
+for (const full of [false, true]) {
+  for (const tool of ['read', 'write', 'edit']) {
+    test(`direct child ${tool} enters LRU and is shown after ${full ? 'zero' : 'incremental'} backtrack`, (t) => {
+      const { runtime, ctx, group, manager } = fixture(t);
+      const retained = runtime.project(ctx, [{ role: 'user', content: 'task', timestamp: 0 }]);
+      assert.deepEqual([...visibleSkills(retained)], [], 'unaccessed children are not automatically injected');
+      manager.appendMessage({ role: 'assistant', content: [{ type: 'toolCall', id: 'access', name: tool, arguments: { path: group } }], timestamp: 1 });
+      manager.appendMessage({ role: 'toolResult', toolCallId: 'access', toolName: tool, content: [], isError: false, timestamp: 2 });
+      const prepared = runtime.prepare(ctx, full ? [] : retained, 'child-access', full);
+      prepared.commit();
+      assert.deepEqual(latestAccessState(manager.getBranch()).state.active, [group]);
+      assert.deepEqual(skillDetails(prepared.messages[0]).paths, [group]);
+      assert.match(prepared.messages[0].content, full ? /Active skills \(1\/2\)/ : /New active skills/);
+      assert.deepEqual(runtime.prepare(ctx, prepared.messages, 'next', false).messages, []);
+    });
+  }
+}
 
 test('full rebuild releases visibility protection, shows pending once, and only a later settlement evicts it', (t) => {
   const { runtime, ctx, paths, manager } = fixture(t);

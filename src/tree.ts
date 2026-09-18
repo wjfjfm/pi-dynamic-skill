@@ -65,7 +65,7 @@ function withChildren(text: string, children: SkillNode[]): string {
 }
 
 /** Only traverse skills/<name>/SKILL.md; never follow symlinks inside a tree. */
-function synchronizeNodes(targets: { filePath: string; name: string }[], recursive: boolean): TreeResult {
+function synchronizeNodes(targets: { filePath: string; name: string }[], recursive: boolean, readOnly = false): TreeResult {
   const diagnostics: string[] = [];
   const visit = (filePath: string, expectedName: string): SkillNode | undefined => {
     // Retry the entire read/scan/patch operation so both parent text and child
@@ -109,7 +109,7 @@ function synchronizeNodes(targets: { filePath: string; name: string }[], recursi
         }
         if (readFileSync(filePath, "utf8") !== original) continue;
         const updated = withChildren(original, children);
-        if (updated !== original) {
+        if (!readOnly && updated !== original) {
           const temporary = join(dirname(filePath), `.dynamic-skill-${randomUUID()}.tmp`);
           try {
             writeFileSync(temporary, updated, { flag: "wx", mode: lstatSync(filePath).mode & 0o777 });
@@ -178,20 +178,9 @@ export function isManagedSkill(rootPaths: string[], filePath: string): boolean {
   });
 }
 
-/** Direct children of recognized roots, never grandchildren or symlink targets. */
-export function listTopLevelSkills(rootPaths: string[]): string[] {
-  const paths = new Set<string>();
-  for (const root of rootPaths) {
-    if (!isManagedSkill(rootPaths, root)) continue;
-    const directory = join(dirname(root), "skills");
-    if (!existsSync(directory)) continue;
-    for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, "en"))) {
-      if (!entry.isDirectory()) continue;
-      const filePath = join(directory, entry.name, "SKILL.md");
-      if (isManagedSkill(rootPaths, filePath)) paths.add(filePath);
-    }
-  }
-  return [...paths];
+/** Browse without rewriting generated indexes or recording model accesses. */
+export function readSkillTrees(rootPaths: string[]): TreeResult {
+  return synchronizeNodes([...new Set(rootPaths)].map((filePath) => ({ filePath, name: "dynamic-skill" })), true, true);
 }
 
 export function synchronizeTrees(rootPaths: string[]): TreeResult {
