@@ -5,6 +5,7 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
 import { loadConfig } from '../dist/config.js';
+import { storagePaths } from '../dist/storage.js';
 import { ACCESS_STATE, latestAccessState } from '../dist/access.js';
 import extension from '../dist/index.js';
 
@@ -28,13 +29,14 @@ test('capacity config defaults safely and rejects malformed values', (t) => {
 test('startup and reload load capacity; compact uses the loaded value; shrinking preserves overflow as pending', async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), 'dynamic-capacity-'));
   const previous = process.env.PI_CODING_AGENT_DIR;
-  process.env.PI_CODING_AGENT_DIR = cwd;
+  process.env.PI_CODING_AGENT_DIR = join(cwd, 'agent');
   t.after(() => {
     if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previous;
     rmSync(cwd, { recursive: true, force: true });
   });
-  const config = join(cwd, 'dynamic-skill.json');
+  const { config } = storagePaths(process.env.PI_CODING_AGENT_DIR);
+  mkdirSync(dirname(config), { recursive: true });
   writeFileSync(config, '{"capacity":3}');
   const root = join(cwd, 'skills', 'dynamic-skill', 'SKILL.md');
   const group = join(dirname(root), 'skills', 'group', 'SKILL.md');

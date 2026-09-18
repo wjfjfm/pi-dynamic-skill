@@ -1,7 +1,5 @@
-import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readSkillTrees, refreshWrittenSkill, synchronizeTrees } from "./tree.js";
 import { ACTIVE_CAPACITY, MANUAL_SELECTION, selectionState } from "./access.js";
@@ -9,6 +7,7 @@ import { SkillSelector, skillRows } from "./selector.js";
 import { contextOwner } from "./context.js";
 import { createSkillContextRuntime } from "./runtime.js";
 import { loadConfig } from "./config.js";
+import { initializeStorage } from "./storage.js";
 
 function resolveToolPath(path: string, cwd: string): string {
   const normalized = path.replace(/^@/, "").replace(/[\u00a0\u2007\u202f]/g, " ");
@@ -17,7 +16,11 @@ function resolveToolPath(path: string, cwd: string): string {
 
 export default function dynamicSkill(pi: ExtensionAPI): void {
   let capacity = ACTIVE_CAPACITY;
-  const discover = () => pi.getCommands().filter((command) => command.source === "skill" && command.name === "skill:dynamic-skill").map((command) => command.sourceInfo.path);
+  let registeredRoot: string | undefined;
+  const discover = () => [...new Set([
+    ...(registeredRoot ? [registeredRoot] : []),
+    ...pi.getCommands().filter((command) => command.source === "skill" && command.name === "skill:dynamic-skill").map((command) => command.sourceInfo.path),
+  ])];
   const warn = (ctx: ExtensionContext, diagnostics: string[]) => {
     if (!diagnostics.length) return;
     const message = `[dynamic-skill] Skill warnings\n${diagnostics.map((line) => `  ${line}`).join("\n")}`;
@@ -76,29 +79,15 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
     }
   });
   pi.on("resources_discover", async (_event, ctx) => {
-    const config = loadConfig(join(getAgentDir(), "dynamic-skill.json"));
-    capacity = config.capacity;
-    warn(ctx, config.diagnostics);
     try {
-      const roots = discover();
-      let skillPaths: string[] | undefined;
-      if (!roots.length) {
-        const root = join(getAgentDir(), "skills", "dynamic-skill", "SKILL.md");
-        if (!existsSync(root)) {
-          try {
-            await mkdir(dirname(root), { recursive: true });
-            const template = await readFile(new URL("../templates/dynamic-skill/SKILL.md", import.meta.url), "utf8");
-            await writeFile(root, template, { flag: "wx" });
-          } catch (error) {
-            if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
-          }
-        }
-        roots.push(root);
-        skillPaths = [root];
-      }
-      refresh(ctx, roots);
+      const paths = await initializeStorage(getAgentDir());
+      registeredRoot = paths.root;
+      const config = loadConfig(paths.config);
+      capacity = config.capacity;
+      warn(ctx, config.diagnostics);
+      refresh(ctx, discover());
       if (_event.reason === "reload") runtime.settle(ctx, false);
-      if (skillPaths) return { skillPaths };
+      return { skillPaths: [paths.skills] };
     } catch (error) {
       // Resource maintenance must never prevent the session from starting.
       warn(ctx, [error instanceof Error ? error.message : String(error)]);

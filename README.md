@@ -4,7 +4,7 @@
 
 Dynamic skill loading and replacement for [Pi](https://github.com/earendil-works/pi), with **no additional tools**.
 
-The root `dynamic-skill` remains in Pi’s native skill catalog for on-demand reading when creating memories or maintaining the skill tree. Its direct children are discovered through the root's index when the skill is read, not through an automatically injected Root Skills section; no skill bodies are automatically expanded. Each skill contains a generated index of its direct children, so an agent can navigate the tree with ordinary `read` calls. Agents create and update skills with Pi's existing `write` and `edit` tools.
+While the extension is enabled, the root `dynamic-skill` is registered in Pi’s native skill catalog for on-demand reading when creating memories or maintaining the skill tree. Its direct children are discovered through the root's index when the skill is read, not through an automatically injected Root Skills section; no skill bodies are automatically expanded. Each skill contains a generated index of its direct children, so an agent can navigate the tree with ordinary `read` calls. Agents create and update skills with Pi's existing `write` and `edit` tools.
 
 ## Install
 
@@ -12,19 +12,29 @@ The root `dynamic-skill` remains in Pi’s native skill catalog for on-demand re
 pi install git:github.com/wjfjfm/pi-dynamic-skill
 ```
 
-Reload or restart Pi after installation. The extension reuses the effective skill named `dynamic-skill` from Pi's normal discovery, including user, project, configured, and package sources. Pi's existing name precedence applies; duplicate roots are not merged.
+Reload or restart Pi after installation. The extension creates missing files from its templates, without overwriting existing files:
 
-If no root is discovered, the extension creates `~/.pi/agent/skills/dynamic-skill/SKILL.md` (or the equivalent under `PI_CODING_AGENT_DIR`). The root is copied from `templates/dynamic-skill/SKILL.md`, which contains usage instructions, tree-maintenance guidance, the LRU policy, and an authoring example. You may edit it; existing roots are preserved and are not overwritten or automatically migrated. The default lives outside the extension installation, so updating the package does not remove authored skills.
+```text
+~/.pi/dynamic-skill/
+├── dynamic-skill.json
+└── skills/
+    └── dynamic-skill/
+        └── SKILL.md
+```
+
+This directory is outside Pi's automatic skill discovery and the extension installation. Only while loaded does the extension register its `skills/` directory through `resources_discover`; Pi discovers the root without recursively loading its descendants. Disabling the extension does not delete the files. If `PI_CODING_AGENT_DIR` is set, storage is at `../dynamic-skill/` relative to that agent directory.
+
+For an existing installation, move `~/.pi/agent/skills/dynamic-skill/` to `~/.pi/dynamic-skill/skills/dynamic-skill/` and `~/.pi/agent/dynamic-skill.json` to `~/.pi/dynamic-skill/dynamic-skill.json` before reloading. Back up first; do not overwrite an existing destination or leave a symlink in the old skill directory. Old session descriptions retain their original paths; start a new session or reselect skills at the new paths. Explicitly configured skills still follow Pi's own discovery rules and are not disabled with this extension.
 
 ## Configuration
 
-Optional user configuration lives at `~/.pi/agent/dynamic-skill.json` (under `PI_CODING_AGENT_DIR` when set):
+Configuration lives at `~/.pi/dynamic-skill/dynamic-skill.json`, initialized from `templates/dynamic-skill.json`:
 
 ```json
 { "capacity": 20 }
 ```
 
-`capacity` must be a positive safe integer. Configuration is read at startup and `/reload`; compaction uses the already loaded value. Missing configuration uses 20. Invalid configuration reports a warning and falls back to 20. Capacity is a target: overflow candidates whose descriptions remain in retained context stay active, possibly above capacity. They can move to pending once their descriptions no longer survive. Only root files do not count toward capacity; all descendants, including direct children, use the LRU queue after successful access. No configuration file is created automatically.
+`capacity` must be a positive safe integer. Configuration is read at startup and `/reload`; compaction uses the already loaded value. Missing configuration uses 20. Invalid configuration reports a warning and falls back to 20. Capacity is a target: overflow candidates whose descriptions remain in retained context stay active, possibly above capacity. They can move to pending once their descriptions no longer survive. Only root files do not count toward capacity; all descendants, including direct children, use the LRU queue after successful access. Missing configuration is recreated from the template.
 
 ## Tree structure
 

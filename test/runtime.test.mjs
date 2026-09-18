@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { storagePaths } from '../dist/storage.js';
 import { test } from 'node:test';
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager, formatSkillsForPrompt } from '@earendil-works/pi-coding-agent';
 
@@ -16,6 +17,11 @@ test('real Pi runtime creates the template root for on-demand reading without ad
     await rm(cwd, { recursive: true, force: true });
   });
   const settingsManager = SettingsManager.inMemory();
+  const beforeEnable = new DefaultResourceLoader({ cwd, agentDir, settingsManager,
+    noExtensions: true, noContextFiles: true });
+  await beforeEnable.reload();
+  assert.ok(!beforeEnable.getSkills().skills.some((s) => s.name === 'dynamic-skill'));
+  await assert.rejects(readFile(storagePaths(agentDir).root), { code: 'ENOENT' });
   const loader = new DefaultResourceLoader({ cwd, agentDir, settingsManager,
     additionalExtensionPaths: [resolve('src/index.ts')], noContextFiles: true });
   await loader.reload();
@@ -24,7 +30,8 @@ test('real Pi runtime creates the template root for on-demand reading without ad
   t.after(() => session.dispose());
   const errors = [];
   await session.bindExtensions({ onError: (error) => errors.push(error) });
-  const root = join(agentDir, 'skills', 'dynamic-skill', 'SKILL.md');
+  const { root, config } = storagePaths(agentDir);
+  assert.deepEqual(JSON.parse(await readFile(config, 'utf8')), { capacity: 20 });
   const source = await readFile(root, 'utf8');
   assert.equal(source, await readFile('templates/dynamic-skill/SKILL.md', 'utf8'));
   const skills = loader.getSkills().skills;
@@ -36,7 +43,7 @@ test('real Pi runtime creates the template root for on-demand reading without ad
   const notices = [];
   const branchBefore = session.sessionManager.getBranch();
   await command.handler('', { sessionManager: session.sessionManager, hasUI: true, ui: { notify: (text) => notices.push(text) } });
-  assert.ok(notices[0].includes(join(agentDir, 'skills', 'dynamic-skill')));
+  assert.ok(notices[0].includes(join(cwd, 'dynamic-skill', 'skills', 'dynamic-skill')));
   assert.match(notices[0], /Active: 0 \/ 20/);
   assert.match(notices[0], /Pending eviction: 0/);
   assert.deepEqual(session.sessionManager.getBranch(), branchBefore);
@@ -56,4 +63,18 @@ test('real Pi runtime creates the template root for on-demand reading without ad
   assert.doesNotMatch(catalog, /Persistent authored root body/);
   assert.equal(session.messages.length, 0, 'context projection must not append durable history');
   assert.deepEqual(errors, []);
+
+  // Directory registration exposes only the root, not every descendant.
+  const { mkdir } = await import('node:fs/promises');
+  const child = join(cwd, 'dynamic-skill', 'skills', 'dynamic-skill', 'skills', 'child');
+  await mkdir(child, { recursive: true });
+  await writeFile(join(child, 'SKILL.md'), '---\nname: child\ndescription: Child\n---\n');
+  await session.reload();
+  assert.equal(loader.getSkills().skills.filter((s) => s.name === 'dynamic-skill').length, 1);
+  assert.ok(!loader.getSkills().skills.some((s) => s.name === 'child'));
+  assert.match(await readFile(root, 'utf8'), /Persistent authored root body/);
+  const disabled = new DefaultResourceLoader({ cwd, agentDir, settingsManager,
+    noExtensions: true, noContextFiles: true });
+  await disabled.reload();
+  assert.ok(!disabled.getSkills().skills.some((s) => ['dynamic-skill', 'child'].includes(s.name)));
 });

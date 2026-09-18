@@ -40,7 +40,7 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
     "prepare": "npm run build",
-    "test": "npm run build && node --test test/*.test.mjs"
+    "test": "npm run build && node --import ./test/setup.mjs --test test/*.test.mjs"
   },
   "dependencies": {
     "@types/node": "^22.0.0",

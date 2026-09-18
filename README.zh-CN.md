@@ -4,7 +4,7 @@
 
 为 [Pi](https://github.com/earendil-works/pi) 提供 skill 的动态装载与替换，**不增加任何 Tool**。
 
-`dynamic-skill` 根保留在 Pi 原生 skill 目录中，description 引导 Agent 在新增记忆或维护 skill 树时按需读取。根的直接子 skill 通过读取根文件中的索引发现，不再自动注入 Root Skills 分组，也不自动展开任何 skill 正文。每个节点包含自动生成的直接子 skill 目录，Agent 使用普通 `read` 即可逐层导航，使用 Pi 已有的 `write`、`edit` 创建和更新 skill。
+扩展启用时，`dynamic-skill` 根注册到 Pi 原生 skill 列表中，description 引导 Agent 在新增记忆或维护 skill 树时按需读取。根的直接子 skill 通过读取根文件中的索引发现，不再自动注入 Root Skills 分组，也不自动展开任何 skill 正文。每个节点包含自动生成的直接子 skill 目录，Agent 使用普通 `read` 即可逐层导航，使用 Pi 已有的 `write`、`edit` 创建和更新 skill。
 
 ## 安装
 
@@ -12,19 +12,29 @@
 pi install git:github.com/wjfjfm/pi-dynamic-skill
 ```
 
-安装后 reload 或重启 Pi。扩展复用 Pi 原生发现的有效 `dynamic-skill`，支持用户、项目、自定义路径和包来源。同名优先级沿用 Pi 的规则，不合并重复根节点。
+安装后 reload 或重启 Pi。扩展按模板创建缺失的目录和文件，不覆盖已有内容：
 
-未发现根 skill 时，扩展创建 `~/.pi/agent/skills/dynamic-skill/SKILL.md`（设置 `PI_CODING_AGENT_DIR` 时使用对应目录）。默认复制 `templates/dynamic-skill/SKILL.md`，包含使用说明、树维护规则、LRU 策略及编写示例，允许用户修改。已有根文件保留，不覆盖或自动迁移。默认文件位于扩展安装目录之外，包更新不会删除后来编写的 skill。
+```text
+~/.pi/dynamic-skill/
+├── dynamic-skill.json
+└── skills/
+    └── dynamic-skill/
+        └── SKILL.md
+```
+
+该目录位于 Pi 自动发现范围及扩展安装目录之外。仅在扩展加载时通过 `resources_discover` 注册其中的 `skills/` 目录；Pi 发现根节点后不会继续递归装载其后代。禁用扩展不会删除文件。若设置了 `PI_CODING_AGENT_DIR`，则使用该 agent 目录旁的 `../dynamic-skill/`。
+
+旧安装需在 reload 前将 `~/.pi/agent/skills/dynamic-skill/` 移至 `~/.pi/dynamic-skill/skills/dynamic-skill/`，将 `~/.pi/agent/dynamic-skill.json` 移至 `~/.pi/dynamic-skill/dynamic-skill.json`。先备份，不覆盖已有目标，也不要在旧技能目录保留符号链接。旧会话描述仍保留原路径；建议开启新会话，或重新选择新路径下的技能。用户显式配置的技能仍遵循 Pi 自身的发现规则，不随扩展禁用。
 
 ## 配置
 
-可选配置位于 `~/.pi/agent/dynamic-skill.json`（或 `PI_CODING_AGENT_DIR` 下）：
+配置位于 `~/.pi/dynamic-skill/dynamic-skill.json`，按 `templates/dynamic-skill.json` 初始化：
 
 ```json
 { "capacity": 20 }
 ```
 
-容量须为正安全整数。启动及 `/reload` 时读取，compact 使用已加载值。缺失时使用 20；错误时警告并回退到 20。容量是目标上限：仍在保留上下文中有描述的溢出项暂留 active，可超过容量；描述不再保留时才可转 pending。根不占容量。不自动创建配置文件。
+容量须为正安全整数。启动及 `/reload` 时读取，compact 使用已加载值。缺失时使用 20；错误时警告并回退到 20。容量是目标上限：仍在保留上下文中有描述的溢出项暂留 active，可超过容量；描述不再保留时才可转 pending。根不占容量。配置文件缺失时按模板重新创建。
 
 ## 树结构
 
