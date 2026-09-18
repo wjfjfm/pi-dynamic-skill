@@ -12,9 +12,8 @@ export function formatDynamicSkills(state: SkillLruState, roots: string[], capac
     if (!isManagedSkill(roots, path)) return [];
     return loadSkillsFromDir({ dir: dirname(path), source: "dynamic-skill" }).skills.filter((skill) => skill.filePath === path);
   });
-  const topLevel = listTopLevelSkills(roots);
-  const rootPaths = new Set([...roots, ...topLevel]);
-  const rootSkills = load(topLevel).filter((skill) => !skill.disableModelInvocation && !visible.has(skill.filePath));
+  // Root indexes are read on demand; roots and direct children stay outside LRU lists.
+  const rootPaths = new Set([...roots, ...listTopLevelSkills(roots)]);
   const activePaths = state.active.filter((path) => !rootPaths.has(path));
   const active = load(activePaths).filter((skill) => !skill.disableModelInvocation && !visible.has(skill.filePath));
   const pending = load(state.pendingEviction.filter((path) => !rootPaths.has(path))).filter((skill) => !skill.disableModelInvocation && !visible.has(skill.filePath));
@@ -34,11 +33,10 @@ export function formatDynamicSkills(state: SkillLruState, roots: string[], capac
     if (notice) sections.push(notice);
     sections.push(formatted.slice(start));
   };
-  appendSkills("Root Skills", rootSkills);
   appendSkills(full ? `Active skills (${activePaths.length}/${capacity})` : "New active skills", active, undefined, full);
   appendSkills(full ? "Pending eviction" : "New pending eviction", pending,
     "These skills will be evicted at the next compaction, reload, or backtrack unless\naccessed again. Read a skill's SKILL.md to retain it.");
   if (guidance && full) sections.splice(2, 0, guidance);
-  const paths = [...rootSkills, ...active, ...pending].map((skill) => skill.filePath);
+  const paths = [...active, ...pending].map((skill) => skill.filePath);
   return { paths, pendingPaths: pending.map((skill) => skill.filePath), content: !full && !paths.length ? "" : sections.join("\n\n") };
 }

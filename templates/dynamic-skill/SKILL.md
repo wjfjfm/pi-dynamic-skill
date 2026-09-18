@@ -30,8 +30,9 @@ so capacity can be temporarily exceeded. Context updates append only
 missing descriptions; existing descriptions and read results stay unchanged.
 Before backtracking, save useful findings here and confirm the writes
 succeeded. Saving knowledge and backtracking are separate operations.
-Direct children of dynamic-skill roots are listed under Root Skills and do not
-occupy LRU capacity or expire. Deeper skills are managed by the LRU queue.
+Discover direct children through each root's index; they are not injected as
+an extra skill list and do not occupy LRU capacity or expire. Deeper skills
+are managed by the LRU queue.
 
 ## Example
 

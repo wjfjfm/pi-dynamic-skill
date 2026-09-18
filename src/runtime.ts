@@ -82,6 +82,11 @@ export function createSkillContextRuntime(pi: ExtensionAPI, options: {
           const details = skillDetails(message);
           if (details && stateId) details.settlementId = stateId;
         }
+        // A full rebuild replaces the directory, including overlays whose anchors
+        // (notably checkpoint 0 after compact) survive in the retained prefix.
+        // Persist this inside the transaction so a duplicate compact hook cannot
+        // clear a fresh projection created by the first hook.
+        if (full) save({ version: 1, base: base(branch), blocks: [] });
         pi.appendEntry(TRANSACTION, { id: transactionId, messages });
         committed = true;
       } };
@@ -107,10 +112,13 @@ export function createSkillContextRuntime(pi: ExtensionAPI, options: {
       const compactId = full ? base(ctx.sessionManager.getBranch()) : null;
       const prepared = service.prepare(ctx, retained, compactId ? `compact:${compactId}` : randomUUID(), full || !retained.some((m) => skillDetails(m)));
       prepared.commit();
-      // Full compaction restarts the initial overlay; the next context pass materializes it.
-      if (full || !raw.length) { save({ version: 1, base: base(ctx.sessionManager.getBranch()), blocks: [] }); return; }
+      // Full rebuild already reset the overlay in commit; the next context pass
+      // materializes it. Repeated compact notifications must not reset it again.
+      if (full || !retained.length) return;
       const value = projection(ctx.sessionManager.getBranch());
-      const anchor = raw.length ? messageKey(raw[raw.length - 1]!) : null;
+      // The raw tail may have been folded away or excluded (e.g. an aborted
+      // continuation). Append to the effective prefix, not an invisible node.
+      const anchor = messageKey(retained[retained.length - 1]!);
       for (const message of prepared.messages) value.blocks.push({ anchor, before: false, message });
       save(value);
     },

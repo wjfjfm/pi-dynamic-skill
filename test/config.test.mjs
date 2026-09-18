@@ -55,6 +55,10 @@ test('startup and reload load capacity; compact uses the loaded value; shrinking
   await hooks.get('resources_discover')({ reason: 'startup' }, ctx);
   await command.handler('', ctx);
   assert.match(notices.at(-1).text, /Active: 3 \/ 3/);
+  assert.match(notices.at(-1).text, /Root directories/);
+  assert.ok(notices.at(-1).text.includes(dirname(root)));
+  assert.doesNotMatch(notices.at(-1).text, /Root Skills/);
+  assert.ok(!notices.at(-1).text.includes(group), 'the status command does not duplicate the root child index');
   assert.match(hooks.get("context")({ messages: [{ role: 'user', content: 'Task', timestamp: 1 }] }, ctx).messages[0].content, /### Active skills \(3\/3\)/);
   writeFileSync(config, '{"capacity":1}');
   hooks.get('session_compact')({}, ctx);

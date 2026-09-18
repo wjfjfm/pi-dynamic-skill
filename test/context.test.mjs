@@ -6,7 +6,7 @@ import { join, dirname } from 'node:path';
 import { createEventBus, SessionManager } from '@earendil-works/pi-coding-agent';
 import { createSkillContextRuntime } from '../dist/runtime.js';
 import { ACCESS_NOTICE, ACCESS_STATE, latestAccessState, settleAccesses } from '../dist/access.js';
-import { skillContextService, skillDetails, visibleSkills } from '../dist/context.js';
+import { OWNER_CHANNEL, skillContextService, skillDetails, visibleSkills } from '../dist/context.js';
 
 function fixture(t) {
   const dir = mkdtempSync(join(tmpdir(), 'skill-context-'));
@@ -87,6 +87,58 @@ test('full rebuild releases visibility protection, shows pending once, and only 
   next.commit();
   assert.deepEqual(latestAccessState(manager.getBranch()).state.pendingEviction, []);
   assert.deepEqual(next.messages, [], 'expired skills still present in the retained context need no new notices');
+});
+
+test('full rebuild replaces old overlays even when their checkpoint anchor survives', (t) => {
+  const { runtime, ctx, manager, paths } = fixture(t);
+  manager.appendCustomEntry(ACCESS_STATE, { version: 1, active: [paths[0]], pendingEviction: [] });
+  const prefix = { role: 'custom', customType: 'summary', content: 'Stable summary', display: false, timestamp: 0 };
+  const zero = { role: 'custom', customType: 'backtrack:checkpoint', content: '[checkpoint 0]', display: false, timestamp: 0 };
+  const retained = [prefix, zero];
+  const old = runtime.project(ctx, retained);
+  const before = manager.getLeafId();
+  writeFileSync(paths[0], '---\nname: a\ndescription: Rebuilt active description\n---\n');
+  const prepared = runtime.prepare(ctx, retained, 'reset-zero', true);
+  assert.equal(manager.getLeafId(), before, 'preparation must not discard the existing overlay');
+  assert.deepEqual(runtime.project(ctx, retained), old);
+  prepared.commit();
+  const rebuilt = [...retained, ...prepared.messages];
+  assert.deepEqual(runtime.project(ctx, rebuilt), rebuilt, 'the surviving zero anchor must not resurrect the old directory');
+  assert.equal(rebuilt.filter(skillDetails).length, 1);
+  assert.match(JSON.stringify(rebuilt), /Rebuilt active description/);
+  assert.doesNotMatch(JSON.stringify(rebuilt), /a description/);
+  const committed = manager.getLeafId();
+  runtime.prepare(ctx, retained, 'reset-zero', true).commit();
+  assert.equal(manager.getLeafId(), committed, 'replaying a completed full rebuild must not reset its projection again');
+});
+
+test('duplicate compact settlement does not clear a newly materialized projection', (t) => {
+  const { runtime, ctx, manager } = fixture(t);
+  const anchor = manager.appendCustomEntry('compact-boundary', {});
+  manager.appendCompaction('Summary', anchor, 1000);
+  runtime.compact(ctx);
+  const input = [{ role: 'custom', customType: 'backtrack:checkpoint', content: '[checkpoint 0]', display: false, timestamp: 0 }];
+  const first = runtime.project(ctx, input);
+  const leaf = manager.getLeafId();
+  runtime.compact(ctx);
+  assert.equal(manager.getLeafId(), leaf, 'the second compact hook must be a complete no-op');
+  assert.deepEqual(runtime.project(ctx, input), first);
+  assert.equal(manager.getBranch().filter((entry) => entry.customType === ACCESS_STATE).length, 1);
+});
+
+test('reload differences attach to the effective view rather than an excluded raw tail', (t) => {
+  const { runtime, ctx, manager, pi, paths } = fixture(t);
+  const user = { role: 'user', content: 'Task', timestamp: 1 };
+  manager.appendMessage(user);
+  const retained = runtime.project(ctx, [user]);
+  pi.events.on(OWNER_CHANNEL, request => request.accept({ current: () => retained }));
+  read(manager, paths[0]);
+  manager.appendMessage({ role: 'assistant', content: [], stopReason: 'aborted', timestamp: 3 });
+  runtime.settle(ctx, false);
+  const view = runtime.project(ctx, retained);
+  assert.deepEqual(view.slice(0, retained.length), retained);
+  assert.deepEqual(skillDetails(view.at(-1)).paths, [paths[0]]);
+  assert.deepEqual(runtime.project(ctx, view), view);
 });
 
 test('protected over-capacity state survives settlement without repeated promotion or truncation', () => {

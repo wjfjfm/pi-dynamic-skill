@@ -29,7 +29,7 @@ test('native skill lists, immutable projection across reload and notice-based ev
   assert.ok(formatted.content.includes(native.slice(native.indexOf('<available_skills>'))));
   const guidance = native.slice(0, native.indexOf('<available_skills>')).trim();
   assert.equal(formatted.content.split(guidance).length - 1, 1);
-  assert.match(formatted.content, /### Root Skills/);
+  assert.doesNotMatch(formatted.content, /### Root Skills|Group entry/);
   assert.match(formatted.content, /### Active skills \(1\/20\)/);
   assert.match(formatted.content, /### Pending eviction/);
   assert.match(formatted.content, /Read a skill's SKILL.md to retain it/);
@@ -62,11 +62,12 @@ test('native skill lists, immutable projection across reload and notice-based ev
   assert.doesNotMatch(refreshed[0].content, /Updated description/);
   assert.equal(latestAccessState(manager.getBranch()).state.pendingEviction.includes(child('pending')), false,
     'internal eviction does not erase or reprint the historical description');
-  assert.match(refreshed[0].content, /<name>group<\/name>/, "first-level navigation remains available");
+  assert.doesNotMatch(refreshed[0].content, /<name>group<\/name>/);
+  assert.match(readFileSync(root, 'utf8'), /skills\/group\/SKILL.md/, 'root navigation is available when the root skill is read');
   assert.match(readFileSync(child('pending'), 'utf8'), /Pending instructions/, 'eviction never deletes skill files');
 });
 
-test('direct children have a fixed native section without bodies or LRU slots', async (t) => {
+test('direct children are discovered through root indexes, not injected or assigned LRU slots', async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), 'dynamic-roots-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   const roots = ['one', 'two'].map((name) => join(cwd, name, 'dynamic-skill', 'SKILL.md'));
@@ -81,10 +82,9 @@ test('direct children have a fixed native section without bodies or LRU slots', 
   }
   const state = { version: 1, active: [roots[0], children[0]], pendingEviction: [roots[1], children[1]] };
   const formatted = formatDynamicSkills(state, [...roots, roots[0]]);
-  const rootSection = formatted.content;
-  assert.match(rootSection, /### Root Skills/);
-  for (const child of children) assert.ok(rootSection.includes(`<location>${child}</location>`));
-  assert.equal((rootSection.match(/<name>entry<\/name>/g) ?? []).length, 2);
+  assert.doesNotMatch(formatted.content, /Root Skills|<available_skills>|<name>entry<\/name>/);
+  assert.deepEqual(formatted.paths, []);
+  assert.equal(formatDynamicSkills(state, roots, 20, new Set(), false).content, '');
   assert.doesNotMatch(formatted.content, /### Pending eviction|None\./);
   assert.doesNotMatch(formatted.content, /ROOT BODY|CHILD BODY|<name>dynamic-skill<\/name>/);
   assert.deepEqual(formatted.pendingPaths, []);
@@ -102,7 +102,9 @@ test('direct children have a fixed native section without bodies or LRU slots', 
   hooks.get('session_compact')({}, ctx);
   assert.deepEqual(latestAccessState(manager.getBranch()).state, { version: 1, active: [], pendingEviction: [] });
   const projected = hooks.get('context')({ messages: [{ role: 'user', content: 'Task', timestamp: 1 }] }, ctx).messages[0].content;
-  for (const child of children) assert.ok(projected.includes(`<location>${child}</location>`));
+  for (const child of children) assert.ok(!projected.includes(child));
+  assert.match(projected, /Active skills \(0\/20\)/);
+  for (const root of roots) assert.match(readFileSync(root, 'utf8'), /skills\/entry\/SKILL.md/);
 });
 
 

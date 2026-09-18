@@ -31,7 +31,7 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
         const state = latestAccessState(ctx.sessionManager.getBranch())?.state;
         const pinned = new Set([...roots, ...listTopLevelSkills(roots)]);
         const count = (paths: readonly string[] = []) => paths.filter((path) => !pinned.has(path)).length;
-        const message = ["Dynamic skills", "", "Root Skills",
+        const message = ["Dynamic skills", "", "Root directories",
           ...(roots.length ? roots.map((path) => dirname(path)) : ["None."]), "",
           `Active: ${count(state?.active)} / ${capacity}`,
           `Pending eviction: ${count(state?.pendingEviction)}`,
