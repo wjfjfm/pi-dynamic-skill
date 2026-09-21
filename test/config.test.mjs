@@ -69,7 +69,8 @@ test('startup and reload load capacity; compact uses the loaded value; shrinking
   const boundary = manager.appendCustomEntry('compact-boundary', {});
   manager.appendCompaction('Summary', boundary, 1000);
   await hooks.get('resources_discover')({ reason: 'reload' }, ctx);
-  assert.deepEqual(latestAccessState(manager.getBranch()).state, { version: 1, active: paths.slice(0, 1), pendingEviction: paths.slice(1) });
+  assert.deepEqual(latestAccessState(manager.getEntries()).state.active, paths.slice(0, 1));
+  assert.deepEqual(latestAccessState(manager.getEntries()).state.pendingEviction, paths.slice(1));
   await command.handler('', ctx);
   assert.match(notices.at(-1).text, /Active: 1 \/ 1/);
   assert.match(manager.buildSessionContext().messages.findLast(m => m.customType === 'dynamic-skill:context').content, /### Active skills \(1\/1\)/);

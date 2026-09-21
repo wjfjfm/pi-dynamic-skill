@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { createEventBus, SessionManager } from '@earendil-works/pi-coding-agent';
 import { createSkillContextRuntime } from '../dist/runtime.js';
-import { ACCESS_NOTICE, ACCESS_STATE, MANUAL_SELECTION, selectionState, latestAccessState, settleAccesses } from '../dist/access.js';
+import { ACCESS_STATE, MANUAL_SELECTION, latestAccessState } from '../dist/access.js';
 import { skillDetails, visibleSkills } from '../dist/context.js';
 
 function fixture(t) {
@@ -33,7 +33,7 @@ const read = (manager, path, id = 'read') => {
   manager.appendMessage({ role: 'toolResult', toolCallId: id, toolName: 'read', content: [], isError: false, timestamp: 2 });
 };
 
-test('manual additions project on next turn without settlement; removals stay silent until settlement', (t) => {
+test('accesses and manual changes settle immediately without rewriting visible descriptions', (t) => {
   const { runtime, ctx, manager, paths } = fixture(t);
   const user = { role: 'user', content: 'task', timestamp: 0 };
   manager.appendMessage(user);
@@ -41,18 +41,18 @@ test('manual additions project on next turn without settlement; removals stay si
   const initial = manager.buildSessionContext().messages;
   read(manager, paths[0]);
   manager.appendCustomEntry(MANUAL_SELECTION, { add: [paths[1]], remove: [] });
-  assert.equal(latestAccessState(manager.getBranch()), undefined);
+  assert.deepEqual(latestAccessState(manager.getBranch()).state.active, []);
   runtime.reconcile(ctx);
   const projected = manager.buildSessionContext().messages;
   assert.deepEqual(projected.slice(0, initial.length), initial);
   assert.match(projected.at(-1).content, /New active skills/);
-  assert.deepEqual(skillDetails(projected.at(-1)).paths, [paths[1]]);
+  assert.deepEqual(skillDetails(projected.at(-1)).paths, [paths[1], paths[0]]);
   runtime.reconcile(ctx);
   assert.deepEqual(manager.buildSessionContext().messages, projected, 'native loading survives rebuilding from the branch');
   manager.appendCustomEntry(MANUAL_SELECTION, { add: [], remove: [paths[1]] });
-  assert.deepEqual(selectionState(manager.getBranch()).active, []);
-  assert.deepEqual(selectionState(manager.getBranch()).pendingEviction, []);
   runtime.reconcile(ctx);
+  assert.deepEqual(latestAccessState(manager.getEntries()).state.active, [paths[0]]);
+  assert.deepEqual(latestAccessState(manager.getEntries()).state.pendingEviction, []);
   assert.deepEqual(manager.buildSessionContext().messages, projected, 'immutable visible descriptions are not rewritten');
   const prepared = runtime.prepare(ctx, projected, 'manual-settle', false);
   prepared.commit();
@@ -111,7 +111,7 @@ test('backtrack preparation protects visible overflow, appends only missing desc
   runtime.prepare(ctx, retained, 'transaction', false).commit();
   assert.equal(manager.getLeafId(), committed);
   runtime.shown(ctx, prepared.messages);
-  assert.equal(manager.getBranch().some((e) => e.customType === ACCESS_NOTICE), false);
+  assert.deepEqual(latestAccessState(manager.getEntries()).state.announced, []);
   const next = runtime.prepare(ctx, [...retained, ...prepared.messages], 'second', false);
   assert.deepEqual(next.messages, [], 'do not reprint descriptions from any retained block');
   next.commit();
@@ -146,8 +146,11 @@ test('full rebuild releases visibility protection, shows pending once, and only 
   assert.deepEqual(latestAccessState(manager.getBranch()).state.pendingEviction, paths.slice(2));
   runtime.shown(ctx, prepared.messages);
   runtime.shown(ctx, prepared.messages);
-  assert.equal(manager.getBranch().filter((e) => e.customType === ACCESS_NOTICE).length, 1);
-  const next = runtime.prepare(ctx, prepared.messages, 'after-notice', false);
+  assert.deepEqual(latestAccessState(manager.getBranch()).state.announced, paths.slice(2));
+  const batch = runtime.prepare(ctx, prepared.messages, 'ordinary-batch', false);
+  batch.commit();
+  assert.deepEqual(latestAccessState(manager.getBranch()).state.pendingEviction, paths.slice(2));
+  const next = runtime.prepare(ctx, prepared.messages, 'after-notice', true);
   next.commit();
   assert.deepEqual(latestAccessState(manager.getBranch()).state.pendingEviction, []);
   assert.deepEqual(next.messages, [], 'expired skills still present in the retained context need no new notices');
@@ -205,11 +208,13 @@ test('reload differences attach to the effective view rather than an excluded ra
   assert.deepEqual(native[0], retained.find(skillDetails));
 });
 
-test('protected over-capacity state survives settlement without repeated promotion or truncation', () => {
-  const manager = SessionManager.inMemory('/');
-  const state = { version: 1, active: ['/a', '/b', '/c', '/d'], pendingEviction: [] };
-  manager.appendCustomEntry(ACCESS_STATE, state);
-  assert.deepEqual(settleAccesses(manager.getBranch(), (p) => p, () => true, 2, new Set(['/c', '/d'])), state);
-  assert.deepEqual(settleAccesses(manager.getBranch(), (p) => p, () => true, 2, new Set(['/d'])),
-    { version: 1, active: ['/a', '/b', '/d'], pendingEviction: ['/c'] });
+test('protected over-capacity state survives ordinary reconciliation without promotion', t => {
+  const { runtime, ctx, manager, paths } = fixture(t);
+  manager.appendCustomEntry(ACCESS_STATE, { version: 1, active: paths, pendingEviction: [] });
+  const retained = [{ role: 'custom', customType: 'dynamic-skill:context', details: { id: 'visible', paths, pendingPaths: [] } }];
+  runtime.prepare(ctx, retained, 'one', false).commit();
+  assert.deepEqual(latestAccessState(manager.getEntries()).state.active, paths);
+  runtime.prepare(ctx, [], 'two', false).commit();
+  assert.deepEqual(latestAccessState(manager.getEntries()).state.active, paths.slice(0, 2));
+  assert.deepEqual(latestAccessState(manager.getEntries()).state.pendingEviction, paths.slice(2));
 });

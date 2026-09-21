@@ -42,13 +42,13 @@ test('native messages are immutable loading records; manual promotion does not r
   assert.equal(manager.getBranch().filter(e => e.type === 'custom_message').length, 2);
   runtime.reconcile(ctx);
   assert.deepEqual(messages(), before);
-  assert.equal(latestAccessState(manager.getBranch()), undefined);
+  assert.deepEqual(latestAccessState(manager.getBranch()).state.active, [paths[0]]);
   manager.appendCustomEntry(MANUAL_SELECTION, { add: [], remove: [paths[0]] });
   runtime.reconcile(ctx);
   assert.deepEqual(messages(), before, 'queue removal cannot rewrite loaded context');
 });
 
-test('native tree branches recover loading only from the selected effective path', t => {
+test('tree preserves continuous queues and fills only descriptions missing from the target context', t => {
   const { manager, ctx, runtime, paths, messages } = fixture(t);
   runtime.reconcile(ctx);
   const rootLeaf = manager.getLeafId();
@@ -59,12 +59,14 @@ test('native tree branches recover loading only from the selected effective path
   assert.deepEqual([...visibleSkills(messages())], []);
   manager.appendCustomEntry(MANUAL_SELECTION, { add: [paths[1]], remove: [] });
   runtime.reconcile(ctx);
-  assert.deepEqual([...visibleSkills(messages())], [paths[1]]);
+  assert.deepEqual([...visibleSkills(messages())], [paths[1], paths[0]]);
   manager.branch(loadedLeaf);
   assert.deepEqual([...visibleSkills(messages())], [paths[0]]);
   const leaf = manager.getLeafId();
   runtime.reconcile(ctx);
-  assert.equal(manager.getLeafId(), leaf, 'restored native descriptions need no replay');
+  assert.notEqual(manager.getLeafId(), leaf, 'the continuous queue still retains B');
+  assert.deepEqual(skillDetails(messages().at(-1)).paths, [paths[1]]);
+  assert.deepEqual(runtime.state(ctx).active, [paths[1], paths[0]]);
 });
 
 test('compaction drops loading facts even if its summary mentions the skill', t => {
@@ -85,9 +87,9 @@ test('compaction drops loading facts even if its summary mentions the skill', t 
 
 test('pending notices are independent of loaded descriptions and recover after branch navigation', t => {
   const { manager, ctx, runtime, paths, messages } = fixture(t);
-  manager.appendCustomEntry(ACCESS_STATE, { version: 1, active: [paths[0]], pendingEviction: [] });
-  runtime.reconcile(ctx);
   manager.appendCustomEntry(ACCESS_STATE, { version: 1, active: [], pendingEviction: [paths[0]] });
+  manager.appendCustomMessageEntry('dynamic-skill:context', 'Already loaded', false,
+    { id: 'loaded', paths: [paths[0]], pendingPaths: [] });
   const beforeNotice = manager.getLeafId();
   runtime.reconcile(ctx);
   const notice = messages().at(-1);
@@ -110,7 +112,8 @@ test('generic context transition protects loaded overflow independently of queue
   const message = retained[0];
   manager.appendCustomMessageEntry(message.customType, message.content, message.display, message.details);
   runtime.settle(ctx, false, 'transition');
-  assert.deepEqual(latestAccessState(manager.getBranch()).state, { version: 1, active: paths, pendingEviction: [] });
+  assert.deepEqual(latestAccessState(manager.getBranch()).state.active, paths);
+  assert.deepEqual(latestAccessState(manager.getBranch()).state.pendingEviction, []);
   const delta = manager.buildSessionContext().messages.filter(skillDetails);
   assert.equal(delta.length, 2);
   assert.deepEqual(skillDetails(delta[1]).paths, paths.slice(0, 2));

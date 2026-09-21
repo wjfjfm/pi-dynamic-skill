@@ -4,7 +4,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, renameSync, rmSync
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
-import { ACCESS_NOTICE, ACCESS_STATE, latestAccessState, settleAccesses } from '../dist/access.js';
+import { ACCESS_STATE, latestAccessState } from '../dist/access.js';
+import { queueFixture } from './queue-fixture.mjs';
 import extension from '../dist/index.js';
 
 function record(manager, id, name, path, isError = false) {
@@ -12,57 +13,57 @@ function record(manager, id, name, path, isError = false) {
   manager.appendMessage({ role: 'toolResult', toolCallId: id, toolName: name, isError, content: [{ type: 'text', text: 'Result' }], timestamp: 0 });
 }
 
-test('settlement deduplicates successful read/write/edit by last access and respects its persisted boundary', () => {
-  const manager = SessionManager.inMemory('/');
-  const active = Array.from({ length: 20 }, (_, i) => `/skill-${i}/SKILL.md`);
-  manager.appendCustomEntry(ACCESS_STATE, { version: 1, active, pendingEviction: ['/pending/SKILL.md'] });
-  record(manager, '1', 'read', active[19]);
-  record(manager, '2', 'write', active[19]);
-  record(manager, '3', 'edit', active[19]);
-  record(manager, '4', 'read', '/pending/SKILL.md', true);
-  record(manager, '5', 'bash', '/pending/SKILL.md');
-  record(manager, '6', 'read', '/outside/SKILL.md');
-  const eligible = (path) => path !== '/outside/SKILL.md';
-  const state = settleAccesses(manager.getBranch(), (path) => path, eligible);
-  assert.equal(state.active.indexOf(active[19]), 9, 'three operations promote only once');
-  assert.deepEqual(state.pendingEviction, ['/pending/SKILL.md']);
-  manager.appendCustomEntry(ACCESS_STATE, state);
-  assert.deepEqual(settleAccesses(manager.getBranch(), (path) => path, eligible), state);
-  record(manager, '7', 'read', '/pending/SKILL.md');
-  const restored = settleAccesses(manager.getBranch(), (path) => path, eligible);
-  assert.equal(restored.active.indexOf('/pending/SKILL.md'), 10);
-  assert.equal(restored.active.length, 20);
-  assert.equal(restored.pendingEviction.includes('/pending/SKILL.md'), false);
+test('one promotion per batch, another across batches; persisted cursor prevents replay', t => {
+  const f = queueFixture(t, 21, 20);
+  f.seed(f.paths.slice(0, 20), [f.paths[20]]);
+  for (const name of ['read', 'write', 'edit']) f.record(f.paths[19], name);
+  f.record(f.paths[20], 'read', true);
+  f.record(f.paths[20], 'bash');
+  f.record('/outside/SKILL.md');
+  f.runtime.reconcile(f.ctx);
+  assert.equal(f.state().active.indexOf(f.paths[19]), 9);
+  assert.deepEqual(f.state().pendingEviction, [f.paths[20]]);
+  const leaf = f.manager.getLeafId();
+  f.runtime.reconcile(f.ctx);
+  assert.equal(f.manager.getLeafId(), leaf);
+  f.record(f.paths[19], 'edit');
+  f.runtime.reconcile(f.ctx);
+  assert.equal(f.state().active.indexOf(f.paths[19]), 4);
+  f.record(f.paths[20]);
+  f.runtime.reconcile(f.ctx);
+  assert.equal(f.state().active.indexOf(f.paths[20]), 10);
+  assert.equal(f.state().pendingEviction.includes(f.paths[20]), false);
 });
 
-test('latest successful access determines batch order; another branch does not leak into settlement', () => {
-  const manager = SessionManager.inMemory('/');
-  record(manager, '1', 'read', '/A');
-  const fork = manager.getLeafId();
-  record(manager, '2', 'write', '/B');
-  record(manager, '3', 'edit', '/A');
-  // Last accesses are B, A; two fresh admissions put A before B.
-  assert.deepEqual(settleAccesses(manager.getBranch(), (p) => p, () => true).active, ['/A', '/B']);
-  manager.branch(fork);
-  record(manager, '4', 'read', '/C');
-  assert.deepEqual(settleAccesses(manager.getBranch(), (p) => p, () => true).active, ['/C', '/A']);
+test('last successful access determines batch order; navigation does not replay history', t => {
+  const f = queueFixture(t);
+  f.record(f.paths[0]);
+  const branch = f.manager.getLeafId();
+  f.record(f.paths[1], 'write');
+  f.record(f.paths[0], 'edit');
+  f.runtime.reconcile(f.ctx);
+  assert.deepEqual(f.state().active, [f.paths[0], f.paths[1]]);
+  f.manager.branch(branch);
+  f.runtime.reconcile(f.ctx);
+  assert.deepEqual(f.state().active, [f.paths[0], f.paths[1]]);
 });
 
-test('only announced unaccessed pending skills expire; fresh overflow gets another interval', () => {
-  const manager = SessionManager.inMemory('/');
-  const id = manager.appendCustomEntry(ACCESS_STATE, { version: 1, active: ['/A', '/B'], pendingEviction: ['/C', '/D', '/hidden'] });
-  manager.appendCustomEntry(ACCESS_NOTICE, { settlementId: id, paths: ['/C', '/D'] });
-  record(manager, '1', 'read', '/C');
-  const state = settleAccesses(manager.getBranch(), (p) => p, () => true, 2);
-  assert.deepEqual(state.active, ['/A', '/C']);
-  assert.deepEqual(state.pendingEviction, ['/hidden', '/B']);
-  const next = manager.appendCustomEntry(ACCESS_STATE, state);
-  assert.deepEqual(settleAccesses(manager.getBranch(), (p) => p, () => true, 2), state, 'unshown notices survive reload');
-  manager.appendCustomEntry(ACCESS_NOTICE, { settlementId: next, paths: ['/B'] });
-  assert.deepEqual(settleAccesses(manager.getBranch(), (p) => p, () => true, 2).pendingEviction, ['/hidden']);
+test('legacy shown notices migrate; only unvisited pending expires on a lifecycle cycle', t => {
+  const f = queueFixture(t, 5);
+  const id = f.seed(f.paths.slice(0, 2), f.paths.slice(2));
+  f.manager.appendCustomEntry('dynamic-skill:eviction-notice', { settlementId: id, paths: f.paths.slice(2, 4) });
+  f.record(f.paths[2]);
+  f.runtime.settle(f.ctx, false, 'reload:one');
+  assert.deepEqual(f.state().active, [f.paths[0], f.paths[2]]);
+  assert.deepEqual(f.state().pendingEviction, [f.paths[4], f.paths[1]]);
+  f.runtime.reconcile(f.ctx);
+  assert.deepEqual(f.state().pendingEviction, [f.paths[4], f.paths[1]]);
+  f.runtime.shown(f.ctx, f.manager.buildSessionContext().messages);
+  f.runtime.settle(f.ctx, false, 'reload:two');
+  assert.deepEqual(f.state().pendingEviction, []);
 });
 
-test('extension settles on successful compact and reload, never on tool results', async (t) => {
+test('extension settles at turn_end and restores on reload, never commits tentative tool results', async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), 'dynamic-access-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   const root = join(cwd, 'dynamic-skill', 'SKILL.md');
@@ -88,7 +89,7 @@ test('extension settles on successful compact and reload, never on tool results'
   hooks.get('tool_result')({ toolName: 'read', input: { path: child }, isError: false }, ctx);
   assert.equal(manager.getLeafId(), before);
   assert.equal(hooks.has('session_before_compact'), false);
-  hooks.get('session_compact')({}, ctx);
+  hooks.get('turn_end')({}, ctx);
   assert.deepEqual(latestAccessState(manager.getBranch()).state.active, [child]);
   const state = latestAccessState(manager.getBranch()).state;
   install(); // A fresh extension instance restores state from the session.
@@ -100,7 +101,7 @@ test('extension settles on successful compact and reload, never on tool results'
   assert.equal(manager.buildSessionContext().messages.some((m) => m.customType === ACCESS_STATE), false);
 });
 
-test('successful compact refreshes moved/deleted skill indexes before settlement and context', async (t) => {
+test('compact prunes missing skills without modifying authored indexes', async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), 'dynamic-compact-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   const root = join(cwd, 'dynamic-skill', 'SKILL.md');
@@ -124,8 +125,7 @@ test('successful compact refreshes moved/deleted skill indexes before settlement
     appendEntry: (type, data) => {
       if (assertRefreshed && type === ACCESS_STATE) {
         const text = readFileSync(group, 'utf8');
-        assert.match(text, /skills\/moved\/SKILL.md/);
-        assert.doesNotMatch(text, /skills\/(old|removed)\/SKILL.md/);
+        assert.equal(text, '---\nname: group\ndescription: group instructions\n---\n');
       }
       manager.appendCustomEntry(type, data);
     } });
@@ -141,6 +141,7 @@ test('successful compact refreshes moved/deleted skill indexes before settlement
   assertRefreshed = true;
   assert.doesNotThrow(() => hooks.get('session_compact')({}, ctx));
   assert.deepEqual(latestAccessState(manager.getBranch()).state.active, [child('moved')]);
+  hooks.get('tool_result')({ toolName: 'read', input: { path: group }, isError: false }, ctx);
   assert.ok(warnings.some((text) => text.includes('invalid/SKILL.md')));
   const content = manager.buildSessionContext().messages.findLast(m => m.customType === 'dynamic-skill:context').content;
   assert.match(content, /<name>moved<\/name>/);

@@ -10,6 +10,8 @@ export interface PreparedSkills {
   commit(): void;
 }
 export interface SkillContextService {
+  start(ctx: ExtensionContext, reason: string, previousSessionFile?: string): void;
+  state(ctx: ExtensionContext): import("./access.js").AccessState;
   additions(ctx: ExtensionContext): ContextMessage[];
   reconcile(ctx: ExtensionContext): void;
   settle(ctx: ExtensionContext, full: boolean, transactionId?: string): void;
@@ -23,6 +25,7 @@ export interface SkillContextDetails {
   paths: string[];
   pendingPaths: string[];
   settlementId?: string;
+  pendingTokens?: Record<string, string>;
 }
 export function skillDetails(message: ContextMessage): SkillContextDetails | undefined {
   if (message.role !== "custom" || message.customType !== DYNAMIC_CONTEXT) return;

@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
 import extension from '../dist/index.js';
-import { MANUAL_SELECTION, ACCESS_STATE, selectionState } from '../dist/access.js';
+import { MANUAL_SELECTION, latestAccessState } from '../dist/access.js';
 
-test('picker browsing/cancel is read-only; apply persists only differences without advancing settlement boundary', async (t) => {
+test('picker browsing is read-only; applying differences settles immediately without rewriting context', async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), 'dynamic-picker-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   const root = join(cwd, 'dynamic-skill', 'SKILL.md');
@@ -21,7 +21,8 @@ test('picker browsing/cancel is read-only; apply persists only differences witho
   let command, result;
   extension({ on() {}, registerCommand: (_name, value) => { command = value; },
     getCommands: () => [{ source: 'skill', name: 'skill:dynamic-skill', sourceInfo: { path: root } }],
-    appendEntry: (type, data) => manager.appendCustomEntry(type, data) });
+    appendEntry: (type, data) => manager.appendCustomEntry(type, data),
+    sendMessage: m => manager.appendCustomMessageEntry(m.customType, m.content, m.display, m.details) });
   const ctx = { mode: 'tui', cwd, sessionManager: manager, hasUI: true, ui: {
     notify(message) { throw new Error(message); }, custom: async () => result,
   } };
@@ -30,13 +31,15 @@ test('picker browsing/cancel is read-only; apply persists only differences witho
   assert.equal(manager.getBranch().length, 0);
   result = [child];
   await command.handler('', ctx);
-  assert.deepEqual(selectionState(manager.getBranch()).active, [child]);
+  assert.deepEqual(latestAccessState(manager.getEntries()).state.active, [child]);
   assert.equal(manager.getBranch().filter((entry) => entry.customType === MANUAL_SELECTION).length, 1);
+  const count = manager.getEntries().length;
+  const messages = manager.buildSessionContext().messages;
   await command.handler('', ctx);
-  assert.equal(manager.getBranch().length, 1, 'unchanged application does not record an event');
+  assert.equal(manager.getEntries().length, count, 'unchanged application does not record an event');
   result = [];
   await command.handler('', ctx);
-  assert.deepEqual(selectionState(manager.getBranch()).active, []);
-  assert.equal(manager.getBranch().some((entry) => entry.customType === ACCESS_STATE), false);
+  assert.deepEqual(latestAccessState(manager.getEntries()).state.active, []);
+  assert.deepEqual(manager.buildSessionContext().messages, messages, 'cancelling does not change descriptions');
   assert.equal(readFileSync(root, 'utf8'), original);
 });

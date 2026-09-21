@@ -1,10 +1,17 @@
 # pi-dynamic-skill
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+KV-cache-friendly dynamic skill loading for Pi.
 
-Dynamic skill loading and replacement for [Pi](https://github.com/earendil-works/pi), with **no additional tools**.
+**English** · [简体中文](README.zh-CN.md)
 
-While the extension is enabled, the root `dynamic-skill` is registered in Pi’s native skill catalog for on-demand reading when creating memories or maintaining the skill tree. Its direct children are discovered through the root's index when the skill is read, not through an automatically injected Root Skills section; no skill bodies are automatically expanded. Each skill contains a generated index of its direct children, so an agent can navigate the tree with ordinary `read` calls. Agents create and update skills with Pi's existing `write` and `edit` tools.
+## How it works
+
+- **Append-only loading**: append only missing skill descriptions without rewriting existing context, preserving KV cache reuse.
+- **Tree organization**: organize and maintain skills in a multi-level tree.
+- **Automatic discovery**: reading a skill reveals its direct children, expanding the tree on demand.
+- **LRU retention**: keep recently used skills available; evict infrequently used skills from the queue, not from disk.
+
+Use `/dynamic-skill` to browse and select skills. Works independently, or alongside [pi-backtrack](https://github.com/wjfjfm/pi-backtrack) to preserve useful knowledge before folding context.
 
 ## Install
 
@@ -12,132 +19,6 @@ While the extension is enabled, the root `dynamic-skill` is registered in Pi’s
 pi install git:github.com/wjfjfm/pi-dynamic-skill
 ```
 
-Reload or restart Pi after installation. The extension creates missing files from its templates, without overwriting existing files:
+Knowledge is stored in `~/.pi/dynamic-skill/`, separate from the extension.
 
-```text
-~/.pi/dynamic-skill/
-├── dynamic-skill.json
-└── skills/
-    └── dynamic-skill/
-        └── SKILL.md
-```
-
-This directory is outside Pi's automatic skill discovery and the extension installation. Only while loaded does the extension register its `skills/` directory through `resources_discover`; Pi discovers the root without recursively loading its descendants. Disabling the extension does not delete the files. If `PI_CODING_AGENT_DIR` is set, storage is at `../dynamic-skill/` relative to that agent directory.
-
-For an existing installation, move `~/.pi/agent/skills/dynamic-skill/` to `~/.pi/dynamic-skill/skills/dynamic-skill/` and `~/.pi/agent/dynamic-skill.json` to `~/.pi/dynamic-skill/dynamic-skill.json` before reloading. Back up first; do not overwrite an existing destination or leave a symlink in the old skill directory. Old session descriptions retain their original paths; start a new session or reselect skills at the new paths. Explicitly configured skills still follow Pi's own discovery rules and are not disabled with this extension.
-
-## Configuration
-
-Configuration lives at `~/.pi/dynamic-skill/dynamic-skill.json`, initialized from `templates/dynamic-skill.json`:
-
-```json
-{ "capacity": 20 }
-```
-
-`capacity` must be a positive safe integer. Configuration is read at startup and `/reload`; compaction uses the already loaded value. Missing configuration uses 20. Invalid configuration reports a warning and falls back to 20. Capacity is a target: overflow candidates whose descriptions remain in retained context stay active, possibly above capacity. They can move to pending once their descriptions no longer survive. Only root files do not count toward capacity; all descendants, including direct children, use the LRU queue after successful access. Missing configuration is recreated from the template.
-
-## Tree structure
-
-```text
-dynamic-skill/
-├── SKILL.md
-└── skills/
-    ├── development/
-    │   ├── SKILL.md
-    │   └── skills/
-    │       └── testing/
-    │           └── SKILL.md
-    └── research/
-        └── SKILL.md
-```
-
-Every node must have a `SKILL.md`. Children always belong in `skills/<name>/SKILL.md` inside their parent. Empty `skills/` directories are unnecessary: Pi's `write` creates parent directories automatically. A node without children needs no generated index.
-
-```markdown
----
-name: testing
-description: Use when writing or debugging tests.
----
-Check the project's test commands and cover the relevant behavior.
-```
-
-Child names must match their directory names: at most 64 lowercase letters, digits, and single hyphens. Descriptions must be nonblank and at most 1024 characters. Custom bodies may be empty. Incomplete or invalid nodes are reported and excluded from navigation until repaired. Symlinked child nodes are not traversed.
-
-Every `SKILL.md` inside the managed root declares a skill, including files in hidden or misplaced directories. Startup/reload validates all of them, even below invalid or missing parent skills. Successful writes/edits validate the written skill's path, metadata, and ancestor skills. Files require a closed YAML frontmatter block; the root directory and its `name` must both be `dynamic-skill`. These requirements do not apply to files outside the managed root.
-
-## Generated navigation
-
-The extension maintains this block in each parent that has valid children:
-
-```markdown
-<!-- dynamic-skill -->
-## Child skills
-Auto-generated by dynamic-skill, do not write or edit.
-
-- [testing](./skills/testing/SKILL.md): Use when writing or debugging tests.
-<!-- /dynamic-skill -->
-```
-
-Only direct children are listed. The extension preserves text outside the block, removes stale links, and avoids rewriting unchanged files. Reading a child reveals its own body and the next level of navigation. Links are relative to the containing `SKILL.md` directory.
-
-Navigation updates read the file, compute a replacement for the generated block, and check that the source is unchanged before applying it via a temporary file and atomic rename. Detected conflicts restart the read and child scan, up to three attempts; repeated conflicts leave the concurrent edit intact and report a diagnostic. This is lock-free conflict detection, not an atomic compare-and-swap: another writer can still race between the final check and rename.
-
-## Runtime behavior
-
-Run `/dynamic-skill` to open the skill picker. **LRU** shows active skills in queue order; **Tab** switches to the hierarchical **All** tree (roots cannot be selected). Type to search, use arrows/PageUp/PageDown to navigate, **Space** to toggle, **Enter** to apply, and **Esc** to discard the draft. Browsing neither rewrites files nor settles accesses. The queue reflects the last settlement plus manual edits, and may exceed capacity.
-
-Manual additions inject `New active skills` on the next model turn: metadata only, with already-visible descriptions deduplicated. Removals silently await the next backtrack, compact, or reload settlement, without a pending notice. They remove queue membership, **not skill files or immutable historical descriptions**. A later selection or successful read/write/edit restores membership. Manual choices persist on the current session branch, not globally. Non-TUI modes print the complete read-only queue and ordinary pending list.
-
-- No Root Skills section is injected. Reading the root skill reveals its generated child index. Only roots remain exempt from LRU capacity; all descendants use the active/pending queue after successful access. All bodies are read on demand. The initial list is anchored immediately before the first user input; its position and content do not move when later user messages arrive.
-- A `Dynamic skills` section is projected into model context with active and pending-eviction lists. Usage and tree-maintenance instructions come from root SKILL.md files, not a separate hardcoded prompt. Only root files are excluded from LRU; legacy root entries are removed from the queue at the next settlement. Direct children follow the same access and eviction rules as deeper skills. All lists use Pi’s native `formatSkillsForPrompt` output (`name`, `description`, `location`), including its escaping and `disable-model-invocation` behavior. No skill bodies are expanded. Immutable projection blocks and anchors are saved as custom session metadata, not user conversation messages. Updates append missing descriptions rather than replacing an earlier block. Existing historical Root Skills blocks are not rewritten; a new session, backtrack to 0, or compaction rebuild uses the new format.
-- Startup, `/reload`, and successful compaction scan the entire managed tree. After compaction, navigation is refreshed before access settlement and context-list refresh; other Pi resources and extensions are not reloaded. Invalid skills are reported as `[dynamic-skill] Skill warnings` through Pi's warning UI (stderr without a UI), without blocking the session. Generated child navigation is repaired silently; malformed marker boundaries are reported because replacing them could erase authored text. Unexpected initialization failures also become warnings.
-- After a successful `write` or `edit` to a managed `SKILL.md`, validate the actual file and refresh only that node and its direct parent's index. Other branches are not rewritten.
-- Invalid skill metadata or paths append a `[dynamic-skill]` diagnostic to the original tool result. The file remains written and the tool's success status, existing content blocks, and details are preserved. Invalid children are removed from the parent's index when it can be refreshed.
-- Writes and edits are not intercepted or blocked. Changes to generated text are overwritten by regeneration. Malformed marker pairs are reported without guessing which author text to replace.
-- Failed operations, reads, supporting files, and files outside the tree do not trigger maintenance. Startup/reload and successful compaction perform a full scan; changes made via `bash` or an external editor are otherwise discovered only when an affected node is refreshed.
-- The hooks are `resources_discover` for initialization/reload, `tool_result` for write/edit maintenance, `session_compact` for post-compaction access settlement, and `context` for the skill-list projection. No background watcher, timer, per-request scan, or cross-process lock is installed. Concurrent Pi instances writing the same parent are not coordinated in this version.
-
-Successful `read`, `write`, and `edit` operations on valid managed `SKILL.md` files are settled after successful compaction, on `/reload`, and on compatible backtrack commits. Settlement reads the current session branch, deduplicates by normalized path, and processes skills in order of their last successful access. Each skill receives at most one LRU update per settlement interval. A versioned custom session entry stores the active/pending lists and marks the settlement boundary; these entries do not enter model context. Failed operations and other branches do not count. No read hook is installed.
-
-The binary-progressive LRU ordering algorithm is implemented in `src/lru.ts`: a new skill enters at index `floor(N / 2)`; accessing an existing skill at index `i` promotes it to `floor(i / 2)`. Indexes start at zero, the head is most protected, and crossed entries shift back one position. Skills are identified by normalized absolute file paths. `accessSkillState` maintains separate active and pending-eviction collections with an explicit active capacity. A pending skill is readmitted at `floor(active.length / 2)`; overflow moves to pending only if its description is not retained in the effective context. Otherwise it stays active in relative LRU order. With 20 active skills, the active tail promotes to index 9, while a pending or new skill enters at index 10. The default active capacity is 20. Existing blocks remain unchanged. Partial updates append new-active/new-pending differences; full compaction rebuilds the initial directory. With a context owner, reload anchors updates to its effective retained prefix, not a raw tail that may have been folded away or aborted. Pending skills receive a notice asking the agent to read them again. At the next successful compact/reload/backtrack, previously announced candidates without a new successful read/write/edit are removed from the list; new overflow receives a fresh notice interval. A custom session entry records which candidates entered model context, so repeated reloads before a notice is projected do not evict unseen candidates. Eviction never deletes files. Files that are missing or invalid at settlement are excluded.
-
-Already-read child content remains an ordinary tool result in history. Refreshing the root or changing a file does not rewrite previous tool results. This extension does not compact conversation history.
-
-## Backtrack integration
-
-`pi-dynamic-skill/context` exports a versioned context service. Independent extensions cooperate via synchronous service discovery and explicit `project`, `prepare`, `commit`, and `shown` operations, in either load order. The existing file API remains independent.
-
-- The caller supplies retained context. Dynamic-skill finds descriptions already visible anywhere in it.
-- Diffs contain `active - visible` and `pending - visible`; existing descriptions are never reprinted, even after eviction.
-- Visible overflow stays active above capacity; persistence never silently truncates it.
-- Only actually displayed pending candidates count as newly announced. Empty diffs produce no message.
-- Prepare does not commit the queue. Commit is synchronous and transaction-ID-idempotent; a missing service is distinct from a failing installed service.
-- Full rebuilds inherit access state and replace old directory overlays only when committed, even if an old anchor survives (such as checkpoint 0). Duplicate compact notifications do not reset the projection again. This service never calls backtrack, prunes dialogue, or allocates checkpoints.
-
-## Package API
-
-Applications can also import the existing file helpers without loading the extension:
-
-```ts
-import { createSkill, reloadSkills } from "pi-dynamic-skill";
-
-const skill = await createSkill(parentSkillsDirectory, {
-  name: "testing",
-  description: "Use when writing or debugging tests.",
-  content: "Check the project's test commands.",
-});
-const { skills, diagnostics } = reloadSkills(parentSkillsDirectory);
-```
-
-`createSkill` refuses duplicate names with `SkillExistsError`. `reloadSkills` uses Pi's native directory scanner and returns metadata; it does not activate the extension or inject context. Knowledge generation and storage placement remain the caller's responsibility. Git dependency installation builds JavaScript and declarations through `prepare`.
-
-## Development
-
-```sh
-npm ci
-npm run typecheck
-npm test
-pi -e ./src/index.ts
-```
-
-Development targets Pi SDK 0.85.1. Tests include native Pi read/write/edit operations and a real Pi session runtime; no model credentials are required.
+Immediate post-batch delivery requires the companion Pi host fix; see [runtime requirements](docs/refactor-audit.md#必需的原生宿主修复).
