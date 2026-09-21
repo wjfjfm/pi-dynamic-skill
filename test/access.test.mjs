@@ -79,6 +79,7 @@ test('extension settles on successful compact and reload, never on tool results'
     on: (name, handler) => hooks.set(name, handler),
     getCommands: () => [{ source: 'skill', name: 'skill:dynamic-skill', sourceInfo: { path: root } }],
     appendEntry: (type, data) => manager.appendCustomEntry(type, data),
+    sendMessage: (m) => manager.appendCustomMessageEntry(m.customType, m.content, m.display, m.details),
   });
   install();
   await hooks.get('resources_discover')({ reason: 'startup' }, ctx);
@@ -119,6 +120,7 @@ test('successful compact refreshes moved/deleted skill indexes before settlement
   let assertRefreshed = false;
   extension({ registerCommand: () => {}, on: (name, handler) => hooks.set(name, handler),
     getCommands: () => [{ source: 'skill', name: 'skill:dynamic-skill', sourceInfo: { path: root } }],
+    sendMessage: (m) => manager.appendCustomMessageEntry(m.customType, m.content, m.display, m.details),
     appendEntry: (type, data) => {
       if (assertRefreshed && type === ACCESS_STATE) {
         const text = readFileSync(group, 'utf8');
@@ -140,7 +142,7 @@ test('successful compact refreshes moved/deleted skill indexes before settlement
   assert.doesNotThrow(() => hooks.get('session_compact')({}, ctx));
   assert.deepEqual(latestAccessState(manager.getBranch()).state.active, [child('moved')]);
   assert.ok(warnings.some((text) => text.includes('invalid/SKILL.md')));
-  const content = hooks.get('context')({ messages: [{ role: 'user', content: 'Task', timestamp: 1 }] }, ctx).messages[0].content;
+  const content = manager.buildSessionContext().messages.findLast(m => m.customType === 'dynamic-skill:context').content;
   assert.match(content, /<name>moved<\/name>/);
   assert.doesNotMatch(content, /<name>(old|removed)<\/name>/);
   assert.equal(hooks.has('session_compact_failed'), false);

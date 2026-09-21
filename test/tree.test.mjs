@@ -24,11 +24,11 @@ async function harness(t) {
   const warnings = [];
   const commands = [{ source: 'skill', name: 'skill:dynamic-skill', sourceInfo: { path: f.root } }];
   const pi = { registerCommand: () => {}, on: (name, handler) => hooks.set(name, handler), getCommands: () => commands,
-    appendEntry: () => {}, registerTool: () => assert.fail('Extension must be tool free') };
+    appendEntry: () => {}, sendMessage: () => {}, registerTool: () => assert.fail('Extension must be tool free') };
   extension(pi);
-  const ctx = { cwd: f.cwd, hasUI: true, sessionManager: { getBranch: () => [] }, ui: { notify: (...args) => warnings.push(args) } };
+  const ctx = { cwd: f.cwd, hasUI: true, sessionManager: { getBranch: () => [], buildSessionContext: () => ({ messages: [] }) }, ui: { notify: (...args) => warnings.push(args) } };
   await hooks.get('resources_discover')({ reason: 'startup' }, ctx);
-  assert.deepEqual([...hooks.keys()].sort(), ['context', 'resources_discover', 'session_compact', 'session_shutdown', 'tool_result']);
+  assert.deepEqual([...hooks.keys()].sort(), ['before_agent_start', 'context', 'resources_discover', 'session_backtrack', 'session_compact', 'session_tree', 'tool_result']);
   const native = { read: createReadToolDefinition(f.cwd), write: createWriteToolDefinition(f.cwd), edit: createEditToolDefinition(f.cwd) };
   let sequence = 0;
   const call = async (toolName, input) => {

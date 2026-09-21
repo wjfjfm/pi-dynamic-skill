@@ -42,27 +42,33 @@ test('native skill lists, immutable projection across reload and notice-based ev
   const hooks = new Map();
   extension({ registerCommand: () => {}, on: (name, handler) => hooks.set(name, handler),
     getCommands: () => [{ source: 'skill', name: 'skill:dynamic-skill', sourceInfo: { path: root } }],
+    sendMessage: (m) => manager.appendCustomMessageEntry(m.customType, m.content, m.display, m.details),
     appendEntry: (type, data) => manager.appendCustomEntry(type, data) });
   const ctx = { cwd, sessionManager: manager, hasUI: true, ui: { notify: (text) => assert.fail(text) } };
   const original = [{ role: 'user', content: 'Task', timestamp: 1 }];
   manager.appendMessage(original[0]);
-  const project = (messages = original) => hooks.get('context')({ messages }, ctx).messages;
+  const initial = hooks.get('before_agent_start')({}, ctx).message;
+  manager.appendCustomMessageEntry(initial.customType, initial.content, initial.display, initial.details);
+  const project = (messages = manager.buildSessionContext().messages) => {
+    assert.equal(hooks.get('context')({ messages }, ctx), undefined, 'context hook only observes');
+    return messages;
+  };
   const projected = project();
-  assert.equal(projected[0].customType, DYNAMIC_CONTEXT);
-  assert.deepEqual(projected.slice(1), original);
+  assert.equal(projected[1].customType, DYNAMIC_CONTEXT);
+  assert.deepEqual(projected.slice(0, 1), original);
   assert.deepEqual(project(projected), projected, 'never duplicate the projected block');
   assert.equal(manager.getBranch().filter((e) => e.customType === ACCESS_NOTICE).length, 1);
   assert.match(JSON.stringify(convertToLlm(projected)), /Dynamic skills/);
-  assert.equal(manager.buildSessionContext().messages.length, 1, 'projection metadata is not persisted as conversation history');
+  assert.equal(manager.buildSessionContext().messages.length, 2, 'loading records are native conversation history');
   write(child('active'), 'active', 'Updated description');
   assert.deepEqual(project(), projected, 'metadata remains stable until settlement/reload');
   await hooks.get('resources_discover')({ reason: 'reload' }, ctx);
   const refreshed = project();
   assert.deepEqual(refreshed, projected, 'reload must not rewrite descriptions already injected');
-  assert.doesNotMatch(refreshed[0].content, /Updated description/);
+  assert.doesNotMatch(refreshed[1].content, /Updated description/);
   assert.equal(latestAccessState(manager.getBranch()).state.pendingEviction.includes(child('pending')), false,
     'internal eviction does not erase or reprint the historical description');
-  assert.doesNotMatch(refreshed[0].content, /<name>group<\/name>/);
+  assert.doesNotMatch(refreshed[1].content, /<name>group<\/name>/);
   assert.match(readFileSync(root, 'utf8'), /skills\/group\/SKILL.md/, 'root navigation is available when the root skill is read');
   assert.match(readFileSync(child('pending'), 'utf8'), /Pending instructions/, 'eviction never deletes skill files');
 });
@@ -97,11 +103,12 @@ test('direct children use active and pending lists while only roots are excluded
   const hooks = new Map();
   extension({ registerCommand: () => {}, on: (name, handler) => hooks.set(name, handler),
     getCommands: () => roots.map((path) => ({ source: 'skill', name: 'skill:dynamic-skill', sourceInfo: { path } })),
+    sendMessage: (m) => manager.appendCustomMessageEntry(m.customType, m.content, m.display, m.details),
     appendEntry: (type, data) => manager.appendCustomEntry(type, data) });
   const ctx = { cwd, sessionManager: manager, hasUI: true, ui: { notify: (text) => assert.fail(text) } };
   hooks.get('session_compact')({}, ctx);
   assert.deepEqual(latestAccessState(manager.getBranch()).state, { version: 1, active: [children[0]], pendingEviction: [children[1]] });
-  const projected = hooks.get('context')({ messages: [{ role: 'user', content: 'Task', timestamp: 1 }] }, ctx).messages[0].content;
+  const projected = manager.buildSessionContext().messages.findLast(m => m.customType === DYNAMIC_CONTEXT).content;
   for (const child of children) assert.ok(projected.includes(child));
   assert.match(projected, /Active skills \(1\/20\)/);
   for (const root of roots) assert.match(readFileSync(root, 'utf8'), /skills\/entry\/SKILL.md/);

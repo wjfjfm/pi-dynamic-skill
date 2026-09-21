@@ -52,7 +52,8 @@ test('startup and reload load capacity; compact uses the loaded value; shrinking
   const notices = [];
   extension({ on: (name, handler) => hooks.set(name, handler), registerCommand: (_name, handler) => { command = handler; },
     getCommands: () => [{ source: 'skill', name: 'skill:dynamic-skill', sourceInfo: { path: root } }],
-    appendEntry: (type, data) => manager.appendCustomEntry(type, data) });
+    appendEntry: (type, data) => manager.appendCustomEntry(type, data),
+    sendMessage: (m) => manager.appendCustomMessageEntry(m.customType, m.content, m.display, m.details) });
   const ctx = { cwd, sessionManager: manager, hasUI: true, ui: { notify: (text, type) => notices.push({ text, type }) } };
   await hooks.get('resources_discover')({ reason: 'startup' }, ctx);
   await command.handler('', ctx);
@@ -61,15 +62,17 @@ test('startup and reload load capacity; compact uses the loaded value; shrinking
   assert.ok(notices.at(-1).text.includes(dirname(root)));
   assert.doesNotMatch(notices.at(-1).text, /Root Skills/);
   assert.ok(!notices.at(-1).text.includes(group), 'the status command does not duplicate the root child index');
-  assert.match(hooks.get("context")({ messages: [{ role: 'user', content: 'Task', timestamp: 1 }] }, ctx).messages[0].content, /### Active skills \(3\/3\)/);
+  assert.match(hooks.get('before_agent_start')({}, ctx).message.content, /### Active skills \(3\/3\)/);
   writeFileSync(config, '{"capacity":1}');
   hooks.get('session_compact')({}, ctx);
   assert.equal(latestAccessState(manager.getBranch()).state.active.length, 3);
+  const boundary = manager.appendCustomEntry('compact-boundary', {});
+  manager.appendCompaction('Summary', boundary, 1000);
   await hooks.get('resources_discover')({ reason: 'reload' }, ctx);
   assert.deepEqual(latestAccessState(manager.getBranch()).state, { version: 1, active: paths.slice(0, 1), pendingEviction: paths.slice(1) });
   await command.handler('', ctx);
   assert.match(notices.at(-1).text, /Active: 1 \/ 1/);
-  assert.match(hooks.get("context")({ messages: [{ role: 'user', content: 'Task', timestamp: 1 }] }, ctx).messages[0].content, /### Active skills \(1\/1\)/);
+  assert.match(manager.buildSessionContext().messages.findLast(m => m.customType === 'dynamic-skill:context').content, /### Active skills \(1\/1\)/);
   writeFileSync(config, 'broken');
   await hooks.get('resources_discover')({ reason: 'reload' }, ctx);
   assert.ok(notices.some((n) => n.type === 'warning' && n.text.includes('Using capacity 20')));

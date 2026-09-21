@@ -4,7 +4,6 @@ import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil
 import { readSkillTrees, refreshWrittenSkill, synchronizeTrees } from "./tree.js";
 import { ACTIVE_CAPACITY, MANUAL_SELECTION, selectionState } from "./access.js";
 import { SkillSelector, skillRows } from "./selector.js";
-import { contextOwner } from "./context.js";
 import { createSkillContextRuntime } from "./runtime.js";
 import { loadConfig } from "./config.js";
 import { initializeStorage } from "./storage.js";
@@ -67,16 +66,22 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
   };
   const runtime = createSkillContextRuntime(pi, { roots: discover, capacity: () => capacity, resolvePath: resolveToolPath, refresh });
   pi.on("session_compact", (_event, ctx) => runtime.settle(ctx, true));
+  // Structural declaration of the experimental host's public event. Remove
+  // this bridge once the published SDK includes SessionBacktrackEvent. No
+  // extension discovery, private event bus, or backtrack tool dependency.
+  const lifecycle = pi as ExtensionAPI & {
+    on(event: "session_backtrack", handler: (event: { backtrackEntry: { id: string } }, ctx: ExtensionContext) => void): void;
+  };
+  lifecycle.on("session_backtrack", (event, ctx) => runtime.settle(ctx, false, `backtrack:${event.backtrackEntry.id}`));
+  pi.on("before_agent_start", (_event, ctx) => {
+    const message = runtime.additions(ctx)[0];
+    if (message?.role === "custom") return { message };
+  });
+  pi.on("session_tree", (_event, ctx) => runtime.reconcile(ctx));
   pi.on("context", (event, ctx) => {
-    // A context-transforming extension owns composition, not this extension's hook order.
-    if (contextOwner(pi)) return;
-    try {
-      const messages = runtime.project(ctx, event.messages);
-      runtime.shown(ctx, messages);
-      return { messages };
-    } catch (error) {
-      warn(ctx, [`Context loading failed: ${error instanceof Error ? error.message : String(error)}`]);
-    }
+    // Observe the actual request. Context rebuilding and next-turn refresh
+    // belong to the host; never restore or append messages in a context hook.
+    runtime.shown(ctx, event.messages);
   });
   pi.on("resources_discover", async (_event, ctx) => {
     try {
