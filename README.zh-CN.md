@@ -16,7 +16,7 @@
 ## 安装
 
 ```sh
-pi install git:github.com/wjfjfm/pi-dynamic-skill@refactor/public-extension
+pi install git:github.com/wjfjfm/pi-dynamic-skill
 ```
 
 知识保存在 `~/.pi/dynamic-skill/`，与扩展分离。

@@ -16,7 +16,7 @@ Use `/dynamic-skill` to browse and select skills. Works independently, or alongs
 ## Install
 
 ```sh
-pi install git:github.com/wjfjfm/pi-dynamic-skill@refactor/public-extension
+pi install git:github.com/wjfjfm/pi-dynamic-skill
 ```
 
 Knowledge is stored in `~/.pi/dynamic-skill/`, separate from the extension.

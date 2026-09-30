@@ -1,6 +1,6 @@
 # Public-extension runtime
 
-Targets unmodified Pi 0.85.1 and Node ≥22.19.0. No companion host fix is required. Local artifacts were deployed on 2026-09-30 under `~/.local/share/pi-public-extension/20260930-093527/`; its deployment record and rollback script are preserved there. The public-API implementation is maintained on `refactor/public-extension`; the README's Git installation explicitly selects this branch rather than the old `main` baseline.
+Targets unmodified Pi 0.85.1 and Node ≥22.19.0. No companion host fix is required. Local artifacts were deployed on 2026-09-30 under `~/.local/share/pi-public-extension/20260930-093527/`; its deployment record and rollback script are preserved there. The public-API implementation is now maintained on `main`; the temporary `refactor/public-extension` worktree has been consolidated into the primary checkout.
 
 An extension-only artifact refresh was deployed later the same day at `~/.local/share/pi-public-extension/20260930-165207-checkpoints/`, alongside backtrack's v3 checkpoint storage. Dynamic-skill runtime semantics and the public host are unchanged; see that release's `DEPLOYMENT.md` for current paths and rollback.
 
@@ -13,8 +13,8 @@ For package-based installation, keep the existing package entries in this order 
 ```json
 {
   "packages": [
-    "git:github.com/wjfjfm/pi-backtrack@refactor/public-extension",
-    "git:github.com/wjfjfm/pi-dynamic-skill@refactor/public-extension"
+    "git:github.com/wjfjfm/pi-backtrack",
+    "git:github.com/wjfjfm/pi-dynamic-skill"
   ]
 }
 ```
