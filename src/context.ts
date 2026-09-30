@@ -3,23 +3,12 @@ import type { ContextEvent, ExtensionContext } from "@earendil-works/pi-coding-a
 export type ContextMessage = ContextEvent["messages"][number];
 export const DYNAMIC_CONTEXT = "dynamic-skill:context";
 
-export interface PreparedSkills {
-  /** Immutable descriptions to append after committing settlement. */
-  messages: ContextMessage[];
-  /** Synchronous, idempotent persistence. No effect before this call. */
-  commit(): void;
-}
 export interface SkillContextService {
   start(ctx: ExtensionContext, reason: string, previousSessionFile?: string): void;
   state(ctx: ExtensionContext): import("./access.js").AccessState;
-  additions(ctx: ExtensionContext): ContextMessage[];
   project(ctx: ExtensionContext, messages: ContextMessage[]): ContextMessage[];
   reconcile(ctx: ExtensionContext): void;
   settle(ctx: ExtensionContext, full: boolean, transactionId?: string): void;
-  prepare(ctx: ExtensionContext, retained: ContextMessage[], transactionId: string, full: boolean): PreparedSkills;
-  shown(ctx: ExtensionContext, messages: ContextMessage[]): void;
-  /** Idempotent for the current native compaction entry, in either hook order. */
-  compact(ctx: ExtensionContext): void;
 }
 export interface SkillContextDetails {
   id: string;

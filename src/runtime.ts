@@ -29,8 +29,6 @@ export function createSkillContextRuntime(pi: ExtensionAPI, options: {
   let visibleDescriptions: ContextMessage[] = [];
   let scheduledCycle: string | undefined;
   const entries = (ctx: ExtensionContext) => ctx.sessionManager.getEntries();
-  const current = (ctx: ExtensionContext): ContextMessage[] =>
-    ctx.sessionManager.buildContextEntries().flatMap(sessionEntryToContextMessages);
   const restore = (ctx: ExtensionContext) => {
     const id = ctx.sessionManager.getSessionId();
     const history = entries(ctx);
@@ -153,7 +151,17 @@ export function createSkillContextRuntime(pi: ExtensionAPI, options: {
     return [{ role: "custom" as const, customType: DYNAMIC_CONTEXT, content: result.content, display: false, timestamp: 0,
       details: { id, paths: result.paths, pendingPaths: result.pendingPaths, pendingTokens: next.pendingTokens } }];
   };
-  const service: SkillContextService = {
+  const shown = (ctx: ExtensionContext, messages: ContextMessage[]) => {
+    const previous = restore(ctx);
+    const announced = new Set(previous.announced);
+    for (const message of messages) {
+      const details = skillDetails(message);
+      for (const path of details?.pendingPaths ?? []) if (previous.pendingTokens?.[path]
+        && previous.pendingTokens[path] === details?.pendingTokens?.[path]) announced.add(path);
+    }
+    if (announced.size !== (previous.announced ?? []).length) persist(ctx, { ...previous, announced: [...announced] });
+  };
+  return {
     start(ctx, reason, previousSessionFile) {
       visibleDescriptions = [];
       scheduledCycle = undefined;
@@ -171,12 +179,6 @@ export function createSkillContextRuntime(pi: ExtensionAPI, options: {
       }
     },
     state(ctx) { return restore(ctx); },
-    additions(ctx) {
-      const retained = current(ctx);
-      const next = coordinate(ctx, retained);
-      persist(ctx, next);
-      return makeMessage(ctx, next, retained, randomUUID());
-    },
     reconcile(ctx) { persist(ctx, coordinate(ctx, visibleDescriptions)); },
     project(ctx, input) {
       const branch = ctx.sessionManager.getBranch();
@@ -219,29 +221,12 @@ export function createSkillContextRuntime(pi: ExtensionAPI, options: {
       if (mask !== oldMask) pi.appendEntry(PROJECTION_STATE, { mask });
       scheduledCycle = undefined;
       visibleDescriptions = retained.filter(message => skillDetails(message));
-      service.shown(ctx, retained);
+      shown(ctx, retained);
       return retained;
     },
-    prepare(ctx, retained, transactionId, full) {
-      const next = coordinate(ctx, retained, full ? transactionId : undefined);
-      const messages = makeMessage(ctx, next, retained, transactionId);
-      return { messages, commit() { persist(ctx, next); } };
-    },
-    shown(ctx, messages) {
-      const previous = restore(ctx);
-      const announced = new Set(previous.announced);
-      for (const message of messages) {
-        const details = skillDetails(message);
-        for (const path of details?.pendingPaths ?? []) if (previous.pendingTokens?.[path]
-          && previous.pendingTokens[path] === details?.pendingTokens?.[path]) announced.add(path);
-      }
-      if (announced.size !== (previous.announced ?? []).length) persist(ctx, { ...previous, announced: [...announced] });
-    },
-    compact(ctx) { service.settle(ctx, true); },
     settle(ctx, full, transactionId) {
       const compactId = full ? ctx.sessionManager.getBranch().findLast((entry) => entry.type === "compaction")?.id : undefined;
       scheduledCycle = transactionId ?? (compactId ? `compact:${compactId}` : `reload:${ctx.sessionManager.getLeafId()}`);
     },
   };
-  return service;
 }

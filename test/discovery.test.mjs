@@ -90,7 +90,7 @@ test('compaction removes discovery even with old read in raw history; fresh read
   const anchor = f.manager.appendMessage({ role: 'user', content: 'Kept tail', timestamp: 3 });
   f.manager.appendCompaction('Summary mentions skills, not loaded descriptions', anchor, 100);
   const restarted = createSkillContextRuntime(f.pi, f.options);
-  restarted.compact(f.ctx);
+  restarted.settle(f.ctx, true);
   assert.equal(visibleSkills(request(f, restarted)).size, 0);
   assert.equal(f.state().cursor, savedCursor);
   assert.deepEqual(f.state().discovery, []);
@@ -118,7 +118,7 @@ test('rediscovery of an already-visible description does not gain a second lifet
   const anchor = f.manager.appendMessage({ role: 'user', content: 'Tail', timestamp: 3 });
   f.manager.appendCompaction('Summary', anchor, 100);
   const restored = createSkillContextRuntime(f.pi, f.options);
-  restored.compact(f.ctx);
+  restored.settle(f.ctx, true);
   assert.equal(visibleSkills(request(f, restored)).size, 0);
   assert.deepEqual(f.state().discovery, []);
 });

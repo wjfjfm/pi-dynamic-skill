@@ -61,7 +61,7 @@ try {
     const boundary = manager.appendCustomEntry('audit-boundary', {});
     manager.appendCompaction('SUMMARY', boundary, 1000);
   }
-  oldRuntime.compact(oldCtx); runtime.compact(f.ctx);
+  oldRuntime.compact(oldCtx); runtime.settle(f.ctx, true);
   compare('compact rebuild');
   oldRuntime = baseline.createSkillContextRuntime(oldPi, f.options);
   runtime = createSkillContextRuntime(f.pi, f.options);

@@ -58,12 +58,12 @@ test('compaction drops loading facts even if its summary mentions the skill', t 
   const anchor = f.manager.appendCustomEntry('compact-boundary', {});
   f.manager.appendCompaction(`Previously loaded ${f.paths[0]}`, anchor, 1000);
   assert.equal(visibleSkills(f.retained()).size, 0);
-  f.runtime.compact(f.ctx);
+  f.runtime.settle(f.ctx, true);
   const projected = f.request();
   assert.deepEqual([...visibleSkills(projected)], [f.paths[0]]);
   assert.notEqual(projected.find(skillDetails).details.id, oldId);
   const leaf = f.manager.getLeafId();
-  f.runtime.compact(f.ctx); f.request();
+  f.runtime.settle(f.ctx, true); f.request();
   assert.equal(f.manager.getLeafId(), leaf);
 });
 
