@@ -12,7 +12,7 @@ function fixture(t) {
   const raw = () => f.manager.buildSessionContext().messages;
   const retained = () => projectDescriptions(raw(), f.manager.getBranch().flatMap(entry =>
     entry.type === 'custom' && entry.customType === DESCRIPTION_BLOCK ? [entry.data] : []),
-    anchorSources(f.manager.buildContextEntries()));
+    anchorSources(f.manager.buildSessionProjection().entries));
   const request = () => f.runtime.project(f.ctx, raw());
   const select = (add, remove = []) => f.manager.appendCustomEntry(MANUAL_SELECTION, { add, remove });
   return { ...f, raw, retained, request, select };

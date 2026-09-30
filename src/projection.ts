@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { sessionEntryToContextMessages, type SessionEntry } from "@earendil-works/pi-coding-agent";
+import type { ProjectedSessionEntry } from "@earendil-works/pi-coding-agent";
 import { skillDetails, type ContextMessage } from "./context.js";
 
 /** Persist descriptions once, not a copy of the request that made them visible. */
@@ -21,11 +21,12 @@ export function anchorKey(message: ContextMessage): string {
 }
 
 /** Request-local provenance; null means multiple raw entries could be the source. */
-export function anchorSources(entries: readonly SessionEntry[]): Map<string, string | null> {
+export function anchorSources(entries: readonly ProjectedSessionEntry[]): Map<string, string | null> {
   const sources = new Map<string, string | null>();
-  for (const entry of entries) for (const message of sessionEntryToContextMessages(entry)) {
+  for (const entry of entries) for (const message of entry.messages) {
+    if (message.role === "system") continue;
     const key = anchorKey(message);
-    sources.set(key, sources.has(key) ? null : entry.id);
+    sources.set(key, sources.has(key) ? null : entry.sourceEntry.id);
   }
   return sources;
 }

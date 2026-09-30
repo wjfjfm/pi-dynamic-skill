@@ -4,7 +4,7 @@ import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil
 import { readSkillTrees, readChildren, isManagedSkill } from "./tree.js";
 import { ACTIVE_CAPACITY, MANUAL_SELECTION } from "./access.js";
 import { SkillSelector, skillRows } from "./selector.js";
-import { createSkillContextRuntime, DISCOVERY_DETAILS } from "./runtime.js";
+import { createSkillContextRuntime, DISCOVERY_DETAILS, NESTED_ACCESS, type DiscoverySnapshot, type NestedAccess } from "./runtime.js";
 import { loadConfig } from "./config.js";
 import { initializeStorage } from "./storage.js";
 
@@ -98,16 +98,24 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
     }
   });
   pi.on("tool_result", (event, ctx) => {
-    if (event.isError || event.toolName !== "read" || typeof event.input.path !== "string") return;
+    if (event.isError || !["read", "write", "edit"].includes(event.toolName) || typeof event.input.path !== "string") return;
     const parent = resolveToolPath(event.input.path, ctx.cwd);
     if (!isManagedSkill(discover(), parent)) return;
-    try {
-      const result = readChildren(discover(), parent);
-      warn(ctx, result.diagnostics);
-      return { details: { ...(event.details && typeof event.details === "object" ? event.details : {}),
-        [DISCOVERY_DETAILS]: { parent, children: result.roots } } };
-    } catch (error) {
-      warn(ctx, [error instanceof Error ? error.message : String(error)]);
+    let discovery: DiscoverySnapshot | undefined;
+    if (event.toolName === "read") {
+      try {
+        const result = readChildren(discover(), parent);
+        warn(ctx, result.diagnostics);
+        discovery = { parent, children: result.roots };
+      } catch (error) {
+        warn(ctx, [error instanceof Error ? error.message : String(error)]);
+      }
     }
+    if (event.parentToolCallId) {
+      // Pi's nestedCalls audit log is bounded and omits results. It is not an access journal.
+      pi.appendEntry(NESTED_ACCESS, { name: event.toolName, path: parent, ...(discovery ? { discovery } : {}) } satisfies NestedAccess);
+    }
+    if (discovery) return { details: { ...(event.details && typeof event.details === "object" ? event.details : {}),
+      [DISCOVERY_DETAILS]: discovery } };
   });
 }

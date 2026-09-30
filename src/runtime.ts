@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { dirname } from "node:path";
-import { SessionManager, formatSkillsForPrompt, sessionEntryToContextMessages, type ExtensionAPI, type ExtensionContext, type Skill } from "@earendil-works/pi-coding-agent";
+import { SessionManager, formatSkillsForPrompt, type ExtensionAPI, type ExtensionContext, type Skill } from "@earendil-works/pi-coding-agent";
 import { ACCESS_STATE, MANUAL_SELECTION, latestAccessState, type AccessState, type ManualSelection } from "./access.js";
 import { accessSkillState } from "./lru.js";
 import { formatDynamicSkills } from "./prompt.js";
@@ -12,6 +12,9 @@ import { anchorKey, anchorSources, descriptionBlock, projectDescriptions, type D
 export const DESCRIPTION_BLOCK = "dynamic-skill:description:v1";
 const PROJECTION_STATE = "dynamic-skill:projection:v1";
 export const DISCOVERY_DETAILS = "dynamicSkillChildren";
+/** Nested tool results are not transcript messages; record only successful managed-skill accesses. */
+export const NESTED_ACCESS = "dynamic-skill:nested-access";
+export interface NestedAccess { name: string; path: string; discovery?: DiscoverySnapshot }
 export interface DiscoverySnapshot { parent: string; children: SkillNode[] }
 export function discoverySnapshot(details: unknown): DiscoverySnapshot | undefined {
   const value = (details as Record<string, unknown> | undefined)?.[DISCOVERY_DETAILS] as DiscoverySnapshot | undefined;
@@ -91,16 +94,23 @@ export function createSkillContextRuntime(pi: ExtensionAPI, options: {
         }
         cursor = entry.id;
       }
-      if (entry.type !== "message" || entry.message.role !== "toolResult") continue;
-      const message = entry.message;
-      const call = calls.get(message.toolCallId);
-      calls.delete(message.toolCallId);
-      if (!call) continue;
-      cursor = entry.id; // Including failed/empty discoveries: never replay a source.
-      if (message.isError || call.name !== message.toolName) continue;
+      let call: { name: string; path: string } | undefined;
+      let snapshot: DiscoverySnapshot | undefined;
+      if (entry.type === "custom" && entry.customType === NESTED_ACCESS) {
+        const access = entry.data as NestedAccess;
+        call = access; snapshot = access.discovery;
+        cursor = entry.id;
+      } else if (entry.type === "message" && entry.message.role === "toolResult") {
+        const message = entry.message;
+        call = calls.get(message.toolCallId);
+        calls.delete(message.toolCallId);
+        if (!call) continue;
+        cursor = entry.id; // Including failed/empty discoveries: never replay a source.
+        if (message.isError || call.name !== message.toolName) continue;
+        snapshot = discoverySnapshot(message.details);
+      } else continue;
       accesses.delete(call.path); accesses.set(call.path, true);
       if (call.name !== "read" || !isManagedSkill(roots, call.path)) continue;
-      const snapshot = discoverySnapshot(message.details);
       if (snapshot?.parent !== call.path) continue;
       for (const child of snapshot.children) if (!child.disableModelInvocation && eligible(child.filePath)) discoveries.push({ path: child.filePath, source: entry.id });
     }
@@ -137,8 +147,10 @@ export function createSkillContextRuntime(pi: ExtensionAPI, options: {
     const discovered: Skill[] = (next.discovery ?? []).flatMap((item) => {
       if (visible.has(item.path) || result.paths.includes(item.path)) return [];
       const source = history.find((entry) => entry.id === item.source);
-      const child = source?.type === "message" && source.message.role === "toolResult"
-        ? discoverySnapshot(source.message.details)?.children.find((node) => node.filePath === item.path) : undefined;
+      const snapshot = source?.type === "custom" && source.customType === NESTED_ACCESS
+        ? (source.data as NestedAccess).discovery
+        : source?.type === "message" && source.message.role === "toolResult" ? discoverySnapshot(source.message.details) : undefined;
+      const child = snapshot?.children.find((node) => node.filePath === item.path);
       return child ? [{ ...child, baseDir: dirname(child.filePath), source: "dynamic-skill",
         sourceInfo: { path: child.filePath, source: "dynamic-skill", scope: "temporary", origin: "top-level" } }] : [];
     });
@@ -184,30 +196,31 @@ export function createSkillContextRuntime(pi: ExtensionAPI, options: {
       const branch = ctx.sessionManager.getBranch();
       const blocks = branch.flatMap(entry => entry.type === "custom" && entry.customType === DESCRIPTION_BLOCK
         ? [entry.data as DescriptionBlock] : []);
-      const contextEntries = ctx.sessionManager.buildContextEntries();
+      const contextEntries = ctx.sessionManager.buildSessionProjection().entries;
       const sources = anchorSources(contextEntries);
       const retained = projectDescriptions(input, blocks, sources);
-      // A changed nonempty missing-entry mask marks a new projected-history cycle.
-      // This deduplicates backtrack settlement without a private extension protocol;
-      // normal appends leave it stable. It does not classify arbitrary changes as shrink/growth.
+      // Native structural edits and request-local omissions share one settlement identity.
+      // System/loadout changes and ordinary appends do not consume a pending grace cycle.
       const counts = new Map<string, number>();
       for (const message of input) {
         const key = anchorKey(message);
         counts.set(key, (counts.get(key) ?? 0) + 1);
       }
       const missing = contextEntries.flatMap(entry => {
-        const absent = sessionEntryToContextMessages(entry).some(message => {
+        const absent = entry.messages.some(message => {
+          if (message.role === "system") return false;
           const key = anchorKey(message);
           const count = counts.get(key) ?? 0;
           if (count) { counts.set(key, count - 1); return false; }
           return true;
         });
-        return absent ? [entry.id] : [];
+        return absent ? [entry.sourceEntry.id] : [];
       });
-      const mask = createHash("sha256").update(JSON.stringify(missing)).digest("hex");
+      const reduction = branch.findLast(entry => entry.type === "compaction" || entry.type === "context_edit")?.id;
+      const mask = createHash("sha256").update(JSON.stringify({ missing, reduction })).digest("hex");
       const previous = branch.findLast(entry => entry.type === "custom" && entry.customType === PROJECTION_STATE);
       const oldMask = previous?.type === "custom" ? (previous.data as { mask: string }).mask : undefined;
-      const cycle = scheduledCycle ?? (missing.length && mask !== oldMask ? `projection:${mask}` : undefined);
+      const cycle = scheduledCycle ?? ((missing.length || reduction) && mask !== oldMask ? `projection:${mask}` : undefined);
       const next = coordinate(ctx, retained, cycle);
       persist(ctx, next);
       const additions = makeMessage(ctx, next, retained, randomUUID());

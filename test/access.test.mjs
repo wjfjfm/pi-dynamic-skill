@@ -48,10 +48,11 @@ test('last successful access determines batch order; navigation does not replay 
   assert.deepEqual(f.state().active, [f.paths[0], f.paths[1]]);
 });
 
-test('legacy shown notices migrate; only unvisited pending expires on a lifecycle cycle', t => {
+test('only announced, unvisited pending expires on a lifecycle cycle', t => {
   const f = queueFixture(t, 5);
-  const id = f.seed(f.paths.slice(0, 2), f.paths.slice(2));
-  f.manager.appendCustomEntry('dynamic-skill:eviction-notice', { settlementId: id, paths: f.paths.slice(2, 4) });
+  f.seed(f.paths.slice(0, 2), f.paths.slice(2), {
+    announced: f.paths.slice(2, 4), pendingTokens: Object.fromEntries(f.paths.slice(2).map(path => [path, path])),
+  });
   f.record(f.paths[2]);
   f.runtime.settle(f.ctx, false);
   f.runtime.project(f.ctx, f.manager.buildSessionContext().messages);

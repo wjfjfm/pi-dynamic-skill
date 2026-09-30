@@ -43,16 +43,7 @@ export function latestAccessState(entries: SessionEntry[]): { id: string; state:
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i]!;
     if (entry.type !== "custom" || entry.customType !== ACCESS_STATE) continue;
-    const state = restore(entry.data);
-    if (state.pendingTokens) return { id: entry.id, state };
-    // Read the old notice format once; do not keep a second settlement engine.
-    const announced = entries.slice(i + 1).flatMap((notice) => {
-      if (notice.type !== "custom" || notice.customType !== "dynamic-skill:eviction-notice") return [];
-      const data = notice.data as { settlementId?: string; paths?: unknown } | undefined;
-      return data?.settlementId === entry.id && Array.isArray(data.paths)
-        ? data.paths.filter((path): path is string => typeof path === "string" && state.pendingEviction.includes(path)) : [];
-    });
-    return { id: entry.id, state: { ...state, announced: [...new Set(announced)] } };
+    return { id: entry.id, state: restore(entry.data) };
   }
   return undefined;
 }
