@@ -6,6 +6,21 @@ An extension-only artifact refresh was deployed later the same day at `~/.local/
 
 Dynamic-skill works alone. When used with backtrack, load **backtrack before dynamic-skill**, so descriptions are reconciled against the retained request rather than raw history. Do not load two copies of either extension.
 
+This is a pipeline constraint, not an automatic ordering mechanism. Reversing the hooks lets skill reconciliation see raw anchors that the later fold removes: a discovered-only skill can then remain visible instead of expiring. Backtrack preserves unrelated request-local additions, so the failure is not simply deletion of all skill descriptions. Real-SDK tests cover both orders.
+
+For package-based installation, keep the existing package entries in this order in Pi settings (preserve any other settings):
+
+```json
+{
+  "packages": [
+    "git:github.com/wjfjfm/pi-backtrack@refactor/public-extension",
+    "git:github.com/wjfjfm/pi-dynamic-skill@refactor/public-extension"
+  ]
+}
+```
+
+Local package paths follow the same order. Then run `/reload`.
+
 ## Context and state
 
 - Successful tool accesses and manual selections maintain continuous active/pending/discovery queues. Read discovery uses the saved child-description snapshot, not a new filesystem scan during replay.
