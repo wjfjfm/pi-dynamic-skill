@@ -1,5 +1,7 @@
 # 部署与验收记录
 
+> 历史记录：以下是此前修改版宿主的部署，不是本次公开 API 重构的部署。公开 API 版本已另行部署；当前运行和迁移要求见 [public-extension.md](public-extension.md)。
+
 ## 部署
 
 - 新运行时：`~/.local/share/pi-native-backtrack/ee8e49f-dynamic-20260922-032206/runtime`

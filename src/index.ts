@@ -71,27 +71,16 @@ export default function dynamicSkill(pi: ExtensionAPI): void {
   const runtime = createSkillContextRuntime(pi, { roots: discover, capacity: () => capacity, resolvePath: resolveToolPath });
   pi.on("session_start", (event, ctx) => runtime.start(ctx, event.reason, event.previousSessionFile));
   pi.on("session_compact", (_event, ctx) => runtime.settle(ctx, true));
-  // Structural declaration of the experimental host's public event. Remove
-  // this bridge once the published SDK includes SessionBacktrackEvent. No
-  // extension discovery, private event bus, or backtrack tool dependency.
-  const lifecycle = pi as ExtensionAPI & {
-    on(event: "session_backtrack", handler: (event: { backtrackEntry: { id: string } }, ctx: ExtensionContext) => void): void;
-  };
-  let pendingCycle: string | undefined;
-  lifecycle.on("session_backtrack", (event) => { pendingCycle = `backtrack:${event.backtrackEntry.id}`; });
-  pi.on("turn_end", (_event, ctx) => {
-    if (pendingCycle) { runtime.settle(ctx, false, pendingCycle); pendingCycle = undefined; }
-    else runtime.reconcile(ctx);
-  });
-  pi.on("before_agent_start", (_event, ctx) => {
-    const message = runtime.additions(ctx)[0];
-    if (message?.role === "custom") return { message };
-  });
+  pi.on("turn_end", (_event, ctx) => runtime.reconcile(ctx));
   pi.on("session_tree", (_event, ctx) => runtime.reconcile(ctx));
   pi.on("context", (event, ctx) => {
-    // Observe the actual request. Context rebuilding and next-turn refresh
-    // belong to the host; never restore or append messages in a context hook.
-    runtime.shown(ctx, event.messages);
+    try {
+      return { messages: runtime.project(ctx, event.messages) };
+    } catch (error) {
+      warn(ctx, [error instanceof Error ? error.message : String(error)]);
+      ctx.abort();
+      return { messages: [] };
+    }
   });
   pi.on("resources_discover", async (_event, ctx) => {
     try {

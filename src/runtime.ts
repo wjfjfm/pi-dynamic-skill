@@ -1,12 +1,16 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { dirname } from "node:path";
-import { SessionManager, formatSkillsForPrompt, type ExtensionAPI, type ExtensionContext, type Skill } from "@earendil-works/pi-coding-agent";
+import { SessionManager, formatSkillsForPrompt, sessionEntryToContextMessages, type ExtensionAPI, type ExtensionContext, type Skill } from "@earendil-works/pi-coding-agent";
 import { ACCESS_STATE, MANUAL_SELECTION, latestAccessState, type AccessState, type ManualSelection } from "./access.js";
 import { accessSkillState } from "./lru.js";
 import { formatDynamicSkills } from "./prompt.js";
 import { isManagedSkill, type SkillNode } from "./tree.js";
 import { DYNAMIC_CONTEXT, skillDetails, visibleSkills, type ContextMessage, type SkillContextService } from "./context.js";
 
+import { anchorKey, anchorSources, descriptionBlock, projectDescriptions, type DescriptionBlock } from "./projection.js";
+
+export const DESCRIPTION_BLOCK = "dynamic-skill:description:v1";
+const PROJECTION_STATE = "dynamic-skill:projection:v1";
 export const DISCOVERY_DETAILS = "dynamicSkillChildren";
 export interface DiscoverySnapshot { parent: string; children: SkillNode[] }
 export function discoverySnapshot(details: unknown): DiscoverySnapshot | undefined {
@@ -22,10 +26,11 @@ export function createSkillContextRuntime(pi: ExtensionAPI, options: {
 }): SkillContextService {
   let state: AccessState | undefined;
   let session: string | undefined;
+  let visibleDescriptions: ContextMessage[] = [];
+  let scheduledCycle: string | undefined;
   const entries = (ctx: ExtensionContext) => ctx.sessionManager.getEntries();
-  const current = (ctx: ExtensionContext) => (ctx.sessionManager as typeof ctx.sessionManager & {
-    buildSessionContext(): { messages: ContextMessage[] };
-  }).buildSessionContext().messages;
+  const current = (ctx: ExtensionContext): ContextMessage[] =>
+    ctx.sessionManager.buildContextEntries().flatMap(sessionEntryToContextMessages);
   const restore = (ctx: ExtensionContext) => {
     const id = ctx.sessionManager.getSessionId();
     const history = entries(ctx);
@@ -57,9 +62,13 @@ export function createSkillContextRuntime(pi: ExtensionAPI, options: {
       if (item.visibleAtAdmission) return true;
       const source = history.findIndex((entry) => entry.id === item.source);
       if (source < 0) return true;
-      return history.slice(source + 1).some((entry) => entry.type === "custom_message"
-        && entry.customType === DYNAMIC_CONTEXT
-        && (entry.details as { paths?: string[] } | undefined)?.paths?.includes(item.path));
+      return history.slice(source + 1).some((entry) => {
+        const details = entry.type === "custom_message" && entry.customType === DYNAMIC_CONTEXT
+          ? entry.details as { paths?: string[] } | undefined
+          : entry.type === "custom" && entry.customType === DESCRIPTION_BLOCK
+            ? skillDetails((entry.data as DescriptionBlock).message) : undefined;
+        return details?.paths?.includes(item.path);
+      });
     };
     let next: AccessState = { ...previous, active: previous.active.filter(eligible), pendingEviction: previous.pendingEviction.filter(eligible),
       discovery: (previous.discovery ?? []).filter((item) => eligible(item.path) && (visible.has(item.path) || !delivered(item))),
@@ -144,11 +153,10 @@ export function createSkillContextRuntime(pi: ExtensionAPI, options: {
     return [{ role: "custom" as const, customType: DYNAMIC_CONTEXT, content: result.content, display: false, timestamp: 0,
       details: { id, paths: result.paths, pendingPaths: result.pendingPaths, pendingTokens: next.pendingTokens } }];
   };
-  const send = (messages: ContextMessage[]) => {
-    for (const message of messages) if (message.role === "custom") pi.sendMessage(message, { triggerTurn: false });
-  };
   const service: SkillContextService = {
     start(ctx, reason, previousSessionFile) {
+      visibleDescriptions = [];
+      scheduledCycle = undefined;
       if (reason === "new" || reason === "resume") { state = undefined; session = undefined; }
       if (reason === "fork") {
         const inherited = previousSessionFile
@@ -169,7 +177,51 @@ export function createSkillContextRuntime(pi: ExtensionAPI, options: {
       persist(ctx, next);
       return makeMessage(ctx, next, retained, randomUUID());
     },
-    reconcile(ctx) { send(service.additions(ctx)); },
+    reconcile(ctx) { persist(ctx, coordinate(ctx, visibleDescriptions)); },
+    project(ctx, input) {
+      const branch = ctx.sessionManager.getBranch();
+      const blocks = branch.flatMap(entry => entry.type === "custom" && entry.customType === DESCRIPTION_BLOCK
+        ? [entry.data as DescriptionBlock] : []);
+      const contextEntries = ctx.sessionManager.buildContextEntries();
+      const sources = anchorSources(contextEntries);
+      const retained = projectDescriptions(input, blocks, sources);
+      // A changed nonempty missing-entry mask marks a new projected-history cycle.
+      // This deduplicates backtrack settlement without a private extension protocol;
+      // normal appends leave it stable. It does not classify arbitrary changes as shrink/growth.
+      const counts = new Map<string, number>();
+      for (const message of input) {
+        const key = anchorKey(message);
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+      const missing = contextEntries.flatMap(entry => {
+        const absent = sessionEntryToContextMessages(entry).some(message => {
+          const key = anchorKey(message);
+          const count = counts.get(key) ?? 0;
+          if (count) { counts.set(key, count - 1); return false; }
+          return true;
+        });
+        return absent ? [entry.id] : [];
+      });
+      const mask = createHash("sha256").update(JSON.stringify(missing)).digest("hex");
+      const previous = branch.findLast(entry => entry.type === "custom" && entry.customType === PROJECTION_STATE);
+      const oldMask = previous?.type === "custom" ? (previous.data as { mask: string }).mask : undefined;
+      const cycle = scheduledCycle ?? (missing.length && mask !== oldMask ? `projection:${mask}` : undefined);
+      const next = coordinate(ctx, retained, cycle);
+      persist(ctx, next);
+      const additions = makeMessage(ctx, next, retained, randomUUID());
+      for (const message of additions) {
+        const block = descriptionBlock(retained, message, sources);
+        // Record delivery even without a replayable anchor. Otherwise a shown
+        // discovery looks undelivered and an old read resurrects it after folding.
+        pi.appendEntry(DESCRIPTION_BLOCK, block);
+        retained.push(message);
+      }
+      if (mask !== oldMask) pi.appendEntry(PROJECTION_STATE, { mask });
+      scheduledCycle = undefined;
+      visibleDescriptions = retained.filter(message => skillDetails(message));
+      service.shown(ctx, retained);
+      return retained;
+    },
     prepare(ctx, retained, transactionId, full) {
       const next = coordinate(ctx, retained, full ? transactionId : undefined);
       const messages = makeMessage(ctx, next, retained, transactionId);
@@ -188,8 +240,7 @@ export function createSkillContextRuntime(pi: ExtensionAPI, options: {
     compact(ctx) { service.settle(ctx, true); },
     settle(ctx, full, transactionId) {
       const compactId = full ? ctx.sessionManager.getBranch().findLast((entry) => entry.type === "compaction")?.id : undefined;
-      const prepared = service.prepare(ctx, current(ctx), transactionId ?? (compactId ? `compact:${compactId}` : `reload:${ctx.sessionManager.getLeafId()}`), true);
-      prepared.commit(); send(prepared.messages);
+      scheduledCycle = transactionId ?? (compactId ? `compact:${compactId}` : `reload:${ctx.sessionManager.getLeafId()}`);
     },
   };
   return service;

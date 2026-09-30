@@ -49,22 +49,22 @@ test('real Pi runtime creates the template root for on-demand reading without ad
   assert.deepEqual(session.sessionManager.getBranch(), branchBefore);
   await writeFile(root, source + '\nPersistent authored root body.\n');
   const start = await session.extensionRunner.emitBeforeAgentStart('test', undefined, '', { cwd, skills });
-  assert.equal(start.messages.length, 1);
-  await session.sendCustomMessage(start.messages[0]);
+  assert.equal(start?.messages?.length ?? 0, 0);
   const original = [{ role: 'user', content: 'Task', timestamp: 0 }];
-  const messages = await session.extensionRunner.emitContext([...session.messages, ...original]);
-  assert.equal(messages[0].customType, 'dynamic-skill:context');
-  assert.match(messages[0].content, /^\[dynamic-skill extention: ON\]\n\n## Dynamic skills/);
-  assert.doesNotMatch(messages[0].content, /Persistent authored root body/);
-  assert.doesNotMatch(messages[0].content, /Dynamic skills preserve reusable knowledge/);
-  assert.deepEqual(messages.slice(1), original);
+  session.sessionManager.appendMessage(original[0]);
+  const messages = await session.extensionRunner.emitContext(original);
+  assert.equal(messages[1].customType, 'dynamic-skill:context');
+  assert.match(messages[1].content, /^\[dynamic-skill extention: ON\]\n\n## Dynamic skills/);
+  assert.doesNotMatch(messages[1].content, /Persistent authored root body/);
+  assert.doesNotMatch(messages[1].content, /Dynamic skills preserve reusable knowledge/);
+  assert.deepEqual(messages.slice(0, 1), original);
   const catalog = formatSkillsForPrompt(skills);
   assert.match(catalog, /<name>dynamic-skill<\/name>/);
   assert.match(catalog, /Use it only when the context contains \[dynamic-skill extention: ON\]/);
   assert.ok(catalog.includes(root));
   assert.doesNotMatch(catalog, /Persistent authored root body/);
-  assert.equal(session.messages.length, 1, 'native loading persists conversation history');
-  assert.equal(session.sessionManager.getBranch().filter(e => e.type === 'custom_message').length, 1);
+  assert.equal(session.sessionManager.buildSessionContext().messages.length, 1, 'only the real user belongs to raw conversation history');
+  assert.equal(session.sessionManager.getBranch().filter(e => e.customType === 'dynamic-skill:description:v1').length, 1);
   assert.deepEqual(errors, []);
 
   // Directory registration exposes only the root, not every descendant.

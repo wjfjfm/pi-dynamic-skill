@@ -21,7 +21,8 @@
     "tsconfig.json",
     "tsconfig.build.json",
     "README.md",
-    "README.zh-CN.md"
+    "README.zh-CN.md",
+    "docs/public-extension.md"
   ],
   "repository": {
     "type": "git",
@@ -38,10 +39,9 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node -e \"require('node:fs').rmSync('dist', {recursive:true, force:true})\" && tsc -p tsconfig.build.json",
     "prepare": "npm run build",
-    "test": "npm run build && node --import ./test/setup.mjs --test test/*.test.mjs",
-    "test:native": "node scripts/test-native.mjs"
+    "test": "npm run build && node --import ./test/setup.mjs --test test/*.test.mjs"
   },
   "dependencies": {
     "@types/node": "^22.0.0",

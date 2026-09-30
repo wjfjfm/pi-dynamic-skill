@@ -28,6 +28,11 @@ function fixture(t) {
   const runtime = createSkillContextRuntime(pi, { roots: () => [root], capacity: () => 2, resolvePath: (p) => p, refresh() {} });
   return { paths, group, manager, pi, ctx, runtime };
 }
+const request = (runtime, ctx) => {
+  const manager = ctx.sessionManager;
+  if (!manager.buildSessionContext().messages.length) manager.appendMessage({ role: 'user', content: 'Task', timestamp: 0 });
+  return runtime.project(ctx, manager.buildSessionContext().messages);
+};
 const read = (manager, path, id = 'read') => {
   manager.appendMessage({ role: 'assistant', content: [{ type: 'toolCall', id, name: 'read', arguments: { path } }], timestamp: 1 });
   manager.appendMessage({ role: 'toolResult', toolCallId: id, toolName: 'read', content: [], isError: false, timestamp: 2 });
@@ -38,22 +43,22 @@ test('accesses and manual changes settle immediately without rewriting visible d
   const user = { role: 'user', content: 'task', timestamp: 0 };
   manager.appendMessage(user);
   runtime.reconcile(ctx);
-  const initial = manager.buildSessionContext().messages;
+  const initial = request(runtime, ctx);
   read(manager, paths[0]);
   manager.appendCustomEntry(MANUAL_SELECTION, { add: [paths[1]], remove: [] });
   assert.deepEqual(latestAccessState(manager.getBranch()).state.active, []);
   runtime.reconcile(ctx);
-  const projected = manager.buildSessionContext().messages;
+  const projected = request(runtime, ctx);
   assert.deepEqual(projected.slice(0, initial.length), initial);
   assert.match(projected.at(-1).content, /New active skills/);
   assert.deepEqual(skillDetails(projected.at(-1)).paths, [paths[1], paths[0]]);
   runtime.reconcile(ctx);
-  assert.deepEqual(manager.buildSessionContext().messages, projected, 'native loading survives rebuilding from the branch');
+  assert.deepEqual(request(runtime, ctx), projected, 'projection survives rebuilding from the branch');
   manager.appendCustomEntry(MANUAL_SELECTION, { add: [], remove: [paths[1]] });
   runtime.reconcile(ctx);
   assert.deepEqual(latestAccessState(manager.getEntries()).state.active, [paths[0]]);
   assert.deepEqual(latestAccessState(manager.getEntries()).state.pendingEviction, []);
-  assert.deepEqual(manager.buildSessionContext().messages, projected, 'immutable visible descriptions are not rewritten');
+  assert.deepEqual(request(runtime, ctx), projected, 'immutable visible descriptions are not rewritten');
   const prepared = runtime.prepare(ctx, projected, 'manual-settle', false);
   prepared.commit();
   assert.deepEqual(latestAccessState(manager.getBranch()).state.active, [paths[0]], 'manual entry must not swallow preceding tool accesses');
@@ -79,13 +84,13 @@ test('native loading preserves append order without inserting a synthetic anchor
   manager.appendCustomMessageEntry('host', 'Stable prefix', false);
   manager.appendMessage({ role: 'user', content: 'A', timestamp: 1 });
   runtime.reconcile(ctx);
-  const first = manager.buildSessionContext().messages;
+  const first = request(runtime, ctx);
   assert.equal(first[0].customType, 'host');
   assert.equal(first[1].role, 'user');
   assert.ok(skillDetails(first[2]));
   manager.appendMessage({ role: 'user', content: 'B', timestamp: 3 });
   runtime.reconcile(ctx);
-  const next = manager.buildSessionContext().messages;
+  const next = request(runtime, ctx);
   assert.deepEqual(next.slice(0, 3), first);
   assert.equal(next.length, 4);
 });
@@ -94,7 +99,7 @@ test('backtrack preparation protects visible overflow, appends only missing desc
   const { runtime, ctx, paths, manager } = fixture(t);
   manager.appendCustomEntry(ACCESS_STATE, { version: 1, active: paths.slice(0, 2), pendingEviction: [] });
   runtime.reconcile(ctx);
-  const retained = manager.buildSessionContext().messages;
+  const retained = request(runtime, ctx);
   assert.deepEqual([...visibleSkills(retained)].filter((p) => paths.includes(p)), paths.slice(0, 2));
   read(manager, paths[2]);
   const before = manager.getLeafId();
@@ -123,7 +128,7 @@ for (const full of [false, true]) {
     test(`direct child ${tool} enters LRU and is shown after ${full ? 'zero' : 'incremental'} backtrack`, (t) => {
       const { runtime, ctx, group, manager } = fixture(t);
       runtime.reconcile(ctx);
-      const retained = manager.buildSessionContext().messages;
+      const retained = request(runtime, ctx);
       assert.deepEqual([...visibleSkills(retained)], [], 'unaccessed children are not automatically injected');
       manager.appendMessage({ role: 'assistant', content: [{ type: 'toolCall', id: 'access', name: tool, arguments: { path: group } }], timestamp: 1 });
       manager.appendMessage({ role: 'toolResult', toolCallId: 'access', toolName: tool, content: [], isError: false, timestamp: 2 });
@@ -163,12 +168,12 @@ test('rebuilding from an empty loading view uses current descriptions without mo
   const zero = { role: 'custom', customType: 'backtrack:checkpoint', content: '[checkpoint 0]', display: false, timestamp: 0 };
   const retained = [prefix, zero];
   runtime.reconcile(ctx);
-  const old = manager.buildSessionContext().messages;
+  const old = request(runtime, ctx);
   const before = manager.getLeafId();
   writeFileSync(paths[0], '---\nname: a\ndescription: Rebuilt active description\n---\n');
   const prepared = runtime.prepare(ctx, retained, 'reset-zero', true);
   assert.equal(manager.getLeafId(), before, 'preparation must not discard the existing overlay');
-  assert.deepEqual(manager.buildSessionContext().messages, old);
+  assert.deepEqual(request(runtime, ctx), old);
   prepared.commit();
   const rebuilt = [...retained, ...prepared.messages];
   assert.deepEqual(runtime.prepare(ctx, rebuilt, 'next-reset', false).messages, [], 'retained native descriptions need no replay');
@@ -185,11 +190,11 @@ test('duplicate compact settlement does not clear a newly materialized projectio
   const anchor = manager.appendCustomEntry('compact-boundary', {});
   manager.appendCompaction('Summary', anchor, 1000);
   runtime.compact(ctx);
-  const first = manager.buildSessionContext().messages;
+  const first = request(runtime, ctx);
   const leaf = manager.getLeafId();
   runtime.compact(ctx);
   assert.equal(manager.getLeafId(), leaf, 'the second compact hook must be a complete no-op');
-  assert.deepEqual(manager.buildSessionContext().messages, first);
+  assert.deepEqual(request(runtime, ctx), first);
   assert.equal(manager.getBranch().filter((entry) => entry.customType === ACCESS_STATE).length, 1);
 });
 
@@ -198,11 +203,11 @@ test('reload differences attach to the effective view rather than an excluded ra
   const user = { role: 'user', content: 'Task', timestamp: 1 };
   manager.appendMessage(user);
   runtime.reconcile(ctx);
-  const retained = manager.buildSessionContext().messages;
+  const retained = request(runtime, ctx);
   read(manager, paths[0]);
   manager.appendMessage({ role: 'assistant', content: [], stopReason: 'aborted', timestamp: 3 });
   runtime.settle(ctx, false);
-  const native = manager.buildSessionContext().messages.filter(skillDetails);
+  const native = request(runtime, ctx).filter(skillDetails);
   assert.equal(native.length, 2);
   assert.deepEqual(skillDetails(native.at(-1)).paths, [paths[0]]);
   assert.deepEqual(native[0], retained.find(skillDetails));

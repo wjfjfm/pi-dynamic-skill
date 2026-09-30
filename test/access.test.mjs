@@ -54,12 +54,13 @@ test('legacy shown notices migrate; only unvisited pending expires on a lifecycl
   f.manager.appendCustomEntry('dynamic-skill:eviction-notice', { settlementId: id, paths: f.paths.slice(2, 4) });
   f.record(f.paths[2]);
   f.runtime.settle(f.ctx, false, 'reload:one');
+  f.runtime.project(f.ctx, f.manager.buildSessionContext().messages);
   assert.deepEqual(f.state().active, [f.paths[0], f.paths[2]]);
   assert.deepEqual(f.state().pendingEviction, [f.paths[4], f.paths[1]]);
   f.runtime.reconcile(f.ctx);
   assert.deepEqual(f.state().pendingEviction, [f.paths[4], f.paths[1]]);
-  f.runtime.shown(f.ctx, f.manager.buildSessionContext().messages);
   f.runtime.settle(f.ctx, false, 'reload:two');
+  f.runtime.project(f.ctx, f.manager.buildSessionContext().messages);
   assert.deepEqual(f.state().pendingEviction, []);
 });
 
@@ -140,10 +141,11 @@ test('compact prunes missing skills without modifying authored indexes', async (
   record(manager, 'moved-read', 'read', child('moved'));
   assertRefreshed = true;
   assert.doesNotThrow(() => hooks.get('session_compact')({}, ctx));
+  const projected = hooks.get('context')({ messages: manager.buildSessionContext().messages }, ctx).messages;
   assert.deepEqual(latestAccessState(manager.getBranch()).state.active, [child('moved')]);
   hooks.get('tool_result')({ toolName: 'read', input: { path: group }, isError: false }, ctx);
   assert.ok(warnings.some((text) => text.includes('invalid/SKILL.md')));
-  const content = manager.buildSessionContext().messages.findLast(m => m.customType === 'dynamic-skill:context').content;
+  const content = projected.findLast(m => m.customType === 'dynamic-skill:context').content;
   assert.match(content, /<name>moved<\/name>/);
   assert.doesNotMatch(content, /<name>(old|removed)<\/name>/);
   assert.equal(hooks.has('session_compact_failed'), false);

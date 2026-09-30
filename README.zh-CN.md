@@ -16,9 +16,9 @@
 ## 安装
 
 ```sh
-pi install git:github.com/wjfjfm/pi-dynamic-skill
+pi install git:github.com/wjfjfm/pi-dynamic-skill@refactor/public-extension
 ```
 
 知识保存在 `~/.pi/dynamic-skill/`，与扩展分离。
 
-批次后即时注入需要配套 Pi 宿主修复，见[运行要求](docs/refactor-audit.md#必需的原生宿主修复)。
+仅使用公开 Pi API，无需宿主补丁。组合使用时先加载 backtrack，再加载 dynamic-skill。见[运行与迁移说明](docs/public-extension.md)。

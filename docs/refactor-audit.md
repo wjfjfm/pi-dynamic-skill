@@ -1,5 +1,7 @@
 # Dynamic-skill 重构审计
 
+> 历史记录：本文审计的是三队列与修改版宿主方案，文中的宿主修复、sendMessage 与 test:native 已被公开 API 实现替代。当前运行要求见 [public-extension.md](public-extension.md)，当前注入差异审计见相邻 backtrack 仓库的 `docs/public-injection-audit.md`。保留正文作为历史基线，不作为新版本部署指令。
+
 ## 实现边界
 
 统一路径：连续队列 + 宿主有效上下文 → 状态协调 → 缺失描述差分。

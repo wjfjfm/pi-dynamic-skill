@@ -47,19 +47,14 @@ test('native skill lists, immutable projection across reload and notice-based ev
   const ctx = { cwd, sessionManager: manager, hasUI: true, ui: { notify: (text) => assert.fail(text) } };
   const original = [{ role: 'user', content: 'Task', timestamp: 1 }];
   manager.appendMessage(original[0]);
-  const initial = hooks.get('before_agent_start')({}, ctx).message;
-  manager.appendCustomMessageEntry(initial.customType, initial.content, initial.display, initial.details);
-  const project = (messages = manager.buildSessionContext().messages) => {
-    assert.equal(hooks.get('context')({ messages }, ctx), undefined, 'context hook only observes');
-    return messages;
-  };
+  const project = (messages = manager.buildSessionContext().messages) => hooks.get('context')({ messages }, ctx).messages;
   const projected = project();
   assert.equal(projected[1].customType, DYNAMIC_CONTEXT);
   assert.deepEqual(projected.slice(0, 1), original);
   assert.deepEqual(project(projected), projected, 'never duplicate the projected block');
   assert.deepEqual(latestAccessState(manager.getEntries()).state.announced, [child('pending')]);
   assert.match(JSON.stringify(convertToLlm(projected)), /Dynamic skills/);
-  assert.equal(manager.buildSessionContext().messages.length, 2, 'loading records are native conversation history');
+  assert.equal(manager.buildSessionContext().messages.length, 1, 'description entries are not duplicated in raw conversation history');
   write(child('active'), 'active', 'Updated description');
   assert.deepEqual(project(), projected, 'metadata remains stable until settlement/reload');
   await hooks.get('resources_discover')({ reason: 'reload' }, ctx);
@@ -107,9 +102,10 @@ test('direct children use active and pending lists while only roots are excluded
     appendEntry: (type, data) => manager.appendCustomEntry(type, data) });
   const ctx = { cwd, sessionManager: manager, hasUI: true, ui: { notify: (text) => assert.fail(text) } };
   hooks.get('session_compact')({}, ctx);
+  const messages = hooks.get('context')({ messages: manager.buildSessionContext().messages }, ctx).messages;
   assert.deepEqual(latestAccessState(manager.getEntries()).state.active, [children[0]]);
   assert.deepEqual(latestAccessState(manager.getEntries()).state.pendingEviction, [children[1]]);
-  const projected = manager.buildSessionContext().messages.findLast(m => m.customType === DYNAMIC_CONTEXT).content;
+  const projected = messages.findLast(m => m.customType === DYNAMIC_CONTEXT).content;
   for (const child of children) assert.ok(projected.includes(child));
   assert.match(projected, /Active skills \(1\/20\)/);
   for (const root of roots) assert.doesNotMatch(readFileSync(root, 'utf8'), /skills\/entry\/SKILL.md/);

@@ -16,9 +16,9 @@ Use `/dynamic-skill` to browse and select skills. Works independently, or alongs
 ## Install
 
 ```sh
-pi install git:github.com/wjfjfm/pi-dynamic-skill
+pi install git:github.com/wjfjfm/pi-dynamic-skill@refactor/public-extension
 ```
 
 Knowledge is stored in `~/.pi/dynamic-skill/`, separate from the extension.
 
-Immediate post-batch delivery requires the companion Pi host fix; see [runtime requirements](docs/refactor-audit.md#必需的原生宿主修复).
+Uses public Pi APIs; no host patch required. When combined, load backtrack before dynamic-skill. See [runtime and migration](docs/public-extension.md).
