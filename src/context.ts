@@ -8,7 +8,7 @@ export interface SkillContextService {
   state(ctx: ExtensionContext): import("./access.js").AccessState;
   project(ctx: ExtensionContext, messages: ContextMessage[]): ContextMessage[];
   reconcile(ctx: ExtensionContext): void;
-  settle(ctx: ExtensionContext, full: boolean, transactionId?: string): void;
+  settle(ctx: ExtensionContext, full: boolean): void;
 }
 export interface SkillContextDetails {
   id: string;

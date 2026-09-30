@@ -83,18 +83,18 @@ test('pending notices are independent of loaded descriptions and recover after b
   assert.deepEqual(skillDetails(f.request().at(-1)).pendingPaths, [f.paths[0]], 'removed notice must be reissued');
 });
 
-test('generic context transition protects loaded overflow independently of queue origin', t => {
+test('reload protects loaded overflow independently of queue origin', t => {
   const f = fixture(t);
   f.seed(f.paths);
   f.manager.appendCustomMessageEntry('dynamic-skill:context', 'Discovered skill', false,
     { id: 'discovery', paths: [f.paths[2]], pendingPaths: [] });
-  f.runtime.settle(f.ctx, false, 'transition');
+  f.runtime.settle(f.ctx, false);
   const delta = f.request().filter(skillDetails);
   assert.deepEqual(f.state().active, f.paths);
   assert.deepEqual(f.state().pendingEviction, []);
   assert.equal(delta.length, 2);
   assert.deepEqual(skillDetails(delta[1]).paths, f.paths.slice(0, 2));
   const leaf = f.manager.getLeafId();
-  f.runtime.settle(f.ctx, false, 'transition'); f.request();
-  assert.equal(f.manager.getLeafId(), leaf, 'transition settlement is idempotent');
+  f.runtime.settle(f.ctx, false); f.request();
+  assert.equal(f.manager.getLeafId(), leaf, 'repeated reload without pending changes writes nothing');
 });

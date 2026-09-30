@@ -224,9 +224,9 @@ export function createSkillContextRuntime(pi: ExtensionAPI, options: {
       shown(ctx, retained);
       return retained;
     },
-    settle(ctx, full, transactionId) {
+    settle(ctx, full) {
       const compactId = full ? ctx.sessionManager.getBranch().findLast((entry) => entry.type === "compaction")?.id : undefined;
-      scheduledCycle = transactionId ?? (compactId ? `compact:${compactId}` : `reload:${ctx.sessionManager.getLeafId()}`);
+      scheduledCycle = compactId ? `compact:${compactId}` : `reload:${ctx.sessionManager.getLeafId()}`;
     },
   };
 }

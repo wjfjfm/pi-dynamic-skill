@@ -53,13 +53,13 @@ test('legacy shown notices migrate; only unvisited pending expires on a lifecycl
   const id = f.seed(f.paths.slice(0, 2), f.paths.slice(2));
   f.manager.appendCustomEntry('dynamic-skill:eviction-notice', { settlementId: id, paths: f.paths.slice(2, 4) });
   f.record(f.paths[2]);
-  f.runtime.settle(f.ctx, false, 'reload:one');
+  f.runtime.settle(f.ctx, false);
   f.runtime.project(f.ctx, f.manager.buildSessionContext().messages);
   assert.deepEqual(f.state().active, [f.paths[0], f.paths[2]]);
   assert.deepEqual(f.state().pendingEviction, [f.paths[4], f.paths[1]]);
   f.runtime.reconcile(f.ctx);
   assert.deepEqual(f.state().pendingEviction, [f.paths[4], f.paths[1]]);
-  f.runtime.settle(f.ctx, false, 'reload:two');
+  f.runtime.settle(f.ctx, false);
   f.runtime.project(f.ctx, f.manager.buildSessionContext().messages);
   assert.deepEqual(f.state().pendingEviction, []);
 });
